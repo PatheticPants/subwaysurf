@@ -432,9 +432,10 @@ function buildTile() {
 function clearTileDynamic(tile) {
   const d = tile.userData.dynamic;
   while (d.children.length) {
-    const c = d.children.pop();
+    const c = d.children[d.children.length - 1];
     c.traverse?.(o => {
-      if (o.geometry && o.userData.disposable) o.geometry.dispose?.();
+      // Don't dispose the cached coin geometry/material (it's reused)
+      if (o.geometry && o.geometry !== coinGeometry) o.geometry.dispose?.();
     });
     d.remove(c);
   }
@@ -685,14 +686,15 @@ function populateTile(tile, zStart) {
   const isFirst = zStart < 30;
   if (isFirst) return;
 
-  // Decide whether to place a long train across one lane (about 25% chance)
+  // Decide whether to place a long train across one lane (about 35% chance)
   const trainLane = Math.random() < 0.35 ? Math.floor(Math.random() * 3) : -1;
-  let trainEnd = -100;
+  let trainStart = 0, trainEnd = 0;
   if (trainLane >= 0) {
     const len = 18 + Math.random() * 8;
     const train = (Math.random() < 0.3) ? makeMovingTrain(len) : makeTrain(len);
     train.position.set(LANE_X[trainLane], train.userData.baseY, -TILE_LEN / 2 + 6 + Math.random() * (TILE_LEN - len - 8));
-    trainEnd = train.position.z + len / 2;
+    trainStart = train.position.z - len / 2 - 1;
+    trainEnd = train.position.z + len / 2 + 1;
     d.add(train);
   }
 
@@ -702,7 +704,7 @@ function populateTile(tile, zStart) {
     const slotZ = -TILE_LEN / 2 + 6 + s * (TILE_LEN / slotCount);
 
     const lanesAvailable = [0, 1, 2].filter(li => {
-      if (trainLane === li && slotZ < trainEnd && slotZ > trainEnd - 24) return false;
+      if (trainLane === li && slotZ > trainStart && slotZ < trainEnd) return false;
       return true;
     });
     if (!lanesAvailable.length) continue;
@@ -922,3 +924,597 @@ function updateTrail(dt) {
     }
   }
 }
+
+// ===== Input =====
+const Input = {
+  swipeStart: null,
+  swipeMin: 30,
+};
+
+function changeLane(dir) {
+  if (!playerState.alive || gameState.paused || !gameState.running) return;
+  const next = Math.max(0, Math.min(2, playerState.laneIndex + dir));
+  if (next === playerState.laneIndex) return;
+  playerState.laneIndex = next;
+  playerState.targetX = LANE_X[next];
+}
+function jump() {
+  if (!playerState.alive || gameState.paused || !gameState.running) return;
+  if (playerState.y <= 0.001 && !playerState.jumping) {
+    playerState.vy = JUMP_V;
+    playerState.jumping = true;
+    playerState.rolling = false;
+    setRollingPose(false);
+  }
+}
+function roll() {
+  if (!playerState.alive || gameState.paused || !gameState.running) return;
+  if (playerState.jumping) {
+    // fast-fall
+    playerState.vy = -30;
+    return;
+  }
+  if (!playerState.rolling) {
+    playerState.rolling = true;
+    playerState.rollTime = ROLL_TIME;
+    setRollingPose(true);
+  }
+}
+
+// Swipe handler on touch area
+const touchArea = document.getElementById('touch-area');
+touchArea.addEventListener('touchstart', (e) => {
+  const t = e.changedTouches[0];
+  Input.swipeStart = { x: t.clientX, y: t.clientY, time: performance.now() };
+}, { passive: true });
+touchArea.addEventListener('touchend', (e) => {
+  if (!Input.swipeStart) return;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - Input.swipeStart.x;
+  const dy = t.clientY - Input.swipeStart.y;
+  const adx = Math.abs(dx), ady = Math.abs(dy);
+  Input.swipeStart = null;
+  if (adx < Input.swipeMin && ady < Input.swipeMin) {
+    // Tap = jump
+    jump();
+    return;
+  }
+  if (adx > ady) {
+    changeLane(dx > 0 ? 1 : -1);
+  } else {
+    if (dy < 0) jump(); else roll();
+  }
+}, { passive: true });
+
+// Keyboard fallback
+window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  switch (e.key) {
+    case 'ArrowLeft': case 'a': case 'A': changeLane(-1); break;
+    case 'ArrowRight': case 'd': case 'D': changeLane(1); break;
+    case 'ArrowUp': case 'w': case 'W': case ' ': jump(); break;
+    case 'ArrowDown': case 's': case 'S': roll(); break;
+    case 'p': case 'P': case 'Escape': togglePause(); break;
+  }
+});
+
+// ===== Game state =====
+const gameState = {
+  running: false,
+  paused: false,
+  score: 0,
+  coins: 0,
+  best: parseInt(localStorage.getItem('subway-best') || '0', 10),
+  bestCoins: parseInt(localStorage.getItem('subway-best-coins') || '0', 10),
+  multiplier: 1,
+  startTime: 0,
+  elapsed: 0,
+  powerups: { magnet: 0, multiplier: 0, speed: 0, hover: 0, jet: 0 },
+  mission: { goal: 25, progress: 0, label: 'Collect 25 coins' },
+};
+
+const missions = [
+  { goal: 25, label: 'Collect 25 coins' },
+  { goal: 50, label: 'Collect 50 coins' },
+  { goal: 1, label: 'Activate any power-up', kind: 'powerup' },
+  { goal: 200, label: 'Run 200m', kind: 'distance' },
+  { goal: 5, label: 'Jump 5 times', kind: 'jump' },
+];
+
+// ===== HUD elements =====
+const HUD = {
+  root: document.getElementById('hud'),
+  title: document.getElementById('title-screen'),
+  pause: document.getElementById('pause-screen'),
+  gameover: document.getElementById('gameover-screen'),
+  score: document.getElementById('score'),
+  coins: document.getElementById('coins'),
+  best: document.getElementById('best-score'),
+  finalScore: document.getElementById('final-score'),
+  finalCoins: document.getElementById('final-coins'),
+  finalBest: document.getElementById('final-best'),
+  missionText: document.getElementById('mission-text'),
+  missionFill: document.getElementById('mission-fill'),
+  powerups: document.getElementById('powerups'),
+  multiplier: document.getElementById('multiplier-badge'),
+  multiplierText: document.getElementById('multiplier-text'),
+  popups: document.getElementById('popup-layer'),
+  speedBlur: document.getElementById('speed-blur'),
+  coinCard: document.querySelector('.coin-card'),
+};
+
+HUD.best.textContent = gameState.best;
+
+document.getElementById('play-btn').addEventListener('click', startGame);
+document.getElementById('retry-btn').addEventListener('click', startGame);
+document.getElementById('menu-btn').addEventListener('click', () => {
+  HUD.gameover.classList.add('hidden');
+  HUD.title.classList.remove('hidden');
+  HUD.best.textContent = gameState.best;
+});
+document.getElementById('pause-btn').addEventListener('click', togglePause);
+document.getElementById('resume-btn').addEventListener('click', togglePause);
+document.getElementById('quit-btn').addEventListener('click', () => {
+  gameState.paused = false;
+  gameState.running = false;
+  HUD.pause.classList.add('hidden');
+  HUD.root.classList.add('hidden');
+  HUD.title.classList.remove('hidden');
+});
+
+function togglePause() {
+  if (!gameState.running) return;
+  gameState.paused = !gameState.paused;
+  HUD.pause.classList.toggle('hidden', !gameState.paused);
+}
+
+function startGame() {
+  HUD.title.classList.add('hidden');
+  HUD.gameover.classList.add('hidden');
+  HUD.pause.classList.add('hidden');
+  HUD.root.classList.remove('hidden');
+
+  // reset
+  resetWorld();
+  gameState.running = true;
+  gameState.paused = false;
+  gameState.score = 0;
+  gameState.coins = 0;
+  gameState.multiplier = 1;
+  gameState.elapsed = 0;
+  gameState.startTime = performance.now();
+  gameState.powerups = { magnet: 0, multiplier: 0, speed: 0, hover: 0, jet: 0 };
+  pickMission();
+  updateHUD();
+  HUD.powerups.innerHTML = '';
+
+  playerState.laneIndex = 1;
+  playerState.targetX = 0;
+  playerState.y = 0;
+  playerState.vy = 0;
+  playerState.rolling = false;
+  playerState.jumping = false;
+  playerState.alive = true;
+  playerState.speed = BASE_SPEED;
+  playerState.distance = 0;
+  playerState.jumpsDone = 0;
+  player.position.set(0, 0, 0);
+  setRollingPose(false);
+
+  // Reset chasers behind
+  guard.position.set(-1.2, 0, -8);
+  dog.position.set(1.5, 0, -7);
+}
+
+function pickMission() {
+  const m = missions[Math.floor(Math.random() * missions.length)];
+  gameState.mission = { goal: m.goal, progress: 0, label: m.label, kind: m.kind || 'coin' };
+  HUD.missionText.textContent = m.label;
+  HUD.missionFill.style.width = '0%';
+}
+
+function advanceMission(kind, amount = 1) {
+  if (gameState.mission.kind !== kind) return;
+  gameState.mission.progress = Math.min(gameState.mission.goal, gameState.mission.progress + amount);
+  HUD.missionFill.style.width = (gameState.mission.progress / gameState.mission.goal * 100) + '%';
+  if (gameState.mission.progress >= gameState.mission.goal) {
+    gameState.score += 500;
+    showPopup(window.innerWidth / 2, window.innerHeight / 2, 'MISSION +500', true);
+    setTimeout(pickMission, 1200);
+    gameState.mission.kind = '__done__';
+  }
+}
+
+function resetWorld() {
+  // Reposition tiles
+  for (let i = 0; i < tilePool.length; i++) {
+    const t = tilePool[i];
+    clearTileDynamic(t);
+    t.position.z = i * TILE_LEN - TILE_LEN / 2;
+    if (i > 0) populateTile(t, t.position.z);
+  }
+}
+resetWorld();
+
+// ===== HUD update helpers =====
+function updateHUD() {
+  HUD.score.textContent = Math.floor(gameState.score);
+  HUD.coins.textContent = gameState.coins;
+}
+
+function showPopup(x, y, text, power = false) {
+  const el = document.createElement('div');
+  el.className = 'popup' + (power ? ' power' : '');
+  el.style.left = x + 'px';
+  el.style.top = y + 'px';
+  el.textContent = text;
+  HUD.popups.appendChild(el);
+  setTimeout(() => el.remove(), 950);
+}
+
+const powerLabels = {
+  magnet: 'MAGNET', multiplier: '2X COINS',
+  speed: 'SPEED', hover: 'HOVER', jet: 'JETPACK',
+};
+const powerDurations = {
+  magnet: 8, multiplier: 12, speed: 6, hover: 10, jet: 7,
+};
+
+const powerPills = {};
+function showPowerupPill(kind, duration) {
+  if (powerPills[kind]) {
+    powerPills[kind].remove();
+    delete powerPills[kind];
+  }
+  const pill = document.createElement('div');
+  pill.className = 'powerup-pill ' + kind;
+  const label = powerLabels[kind];
+  pill.innerHTML = `<div class="icon">${kind === 'magnet' ? '🧲' : kind === 'multiplier' ? '×2' : kind === 'speed' ? '⚡' : kind === 'hover' ? '🛹' : '🚀'}</div>${label}<div class="timer"></div>`;
+  HUD.powerups.appendChild(pill);
+  powerPills[kind] = pill;
+  pill.userData = { duration, remaining: duration };
+}
+
+function updatePowerupPills(dt) {
+  for (const kind of Object.keys(gameState.powerups)) {
+    const t = gameState.powerups[kind];
+    const pill = powerPills[kind];
+    if (t > 0 && pill) {
+      const pct = (t / pill.userData.duration) * 100;
+      const tEl = pill.querySelector('.timer');
+      if (tEl) tEl.style.width = pct + '%';
+    } else if (t <= 0 && pill) {
+      pill.remove();
+      delete powerPills[kind];
+    }
+  }
+}
+
+function activatePower(kind) {
+  const dur = powerDurations[kind];
+  gameState.powerups[kind] = dur;
+  showPowerupPill(kind, dur);
+  if (kind === 'multiplier') {
+    gameState.multiplier = 2;
+    HUD.multiplier.classList.add('show');
+    HUD.multiplierText.textContent = 'x2';
+  } else if (kind === 'jet' || kind === 'hover') {
+    playerState.vy = 0;
+  }
+  // sparkle around player
+  spawnSparkle(player.position.clone().add(new THREE.Vector3(0, 1.5, 0)),
+    kind === 'magnet' ? 0xff5e5e :
+    kind === 'multiplier' ? 0xffd23f :
+    kind === 'speed' ? 0x2ee6ff :
+    kind === 'hover' ? 0x45e07b : 0xff3da6);
+  showPopup(window.innerWidth / 2, window.innerHeight / 2 - 60, label(kind), true);
+  advanceMission('powerup');
+}
+
+function label(kind) {
+  return powerLabels[kind] || kind.toUpperCase();
+}
+
+// ===== Collision =====
+const playerBox = new THREE.Box3();
+const objBox = new THREE.Box3();
+const tmpVec = new THREE.Vector3();
+
+function getPlayerHalf() {
+  // Width/Depth always similar, Height changes when rolling.
+  const hh = playerState.rolling ? 0.5 : 1.2;
+  return { hw: 0.45, hh, hd: 0.4 };
+}
+
+function aabbOverlap(ax, ay, az, ahw, ahh, ahd, bx, by, bz, bhw, bhh, bhd) {
+  return Math.abs(ax - bx) < ahw + bhw &&
+         Math.abs(ay - by) < ahh + bhh &&
+         Math.abs(az - bz) < ahd + bhd;
+}
+
+function handleCollisions(dt) {
+  const ph = getPlayerHalf();
+  const px = player.position.x;
+  const py = player.position.y + ph.hh; // center
+  const pz = player.position.z;
+
+  // Magnet radius
+  const magnetActive = gameState.powerups.magnet > 0;
+  const magnetR = magnetActive ? 6 : 0;
+
+  // Power active flags
+  const hover = gameState.powerups.hover > 0;
+  const jet = gameState.powerups.jet > 0;
+  const invincible = jet || hover;
+
+  for (const tile of tilePool) {
+    const d = tile.userData.dynamic;
+    if (!d) continue;
+    for (let i = d.children.length - 1; i >= 0; i--) {
+      const obj = d.children[i];
+      // World position of obj
+      tmpVec.set(0, 0, 0);
+      obj.getWorldPosition(tmpVec);
+      const dx = tmpVec.x - px;
+      const dz = tmpVec.z - pz;
+
+      // Skip far objects fast (use obj depth for long trains)
+      const earlyZ = (obj.userData.hd ?? 1) + 4;
+      if (Math.abs(dz) > earlyZ && obj.userData.kind !== 'coin' && obj.userData.kind !== 'powerup') continue;
+
+      // Magnet pulls coins toward player
+      if (obj.userData.kind === 'coin' && magnetActive) {
+        const dist = Math.hypot(dx, tmpVec.y - py, dz);
+        if (dist < magnetR) {
+          const speed = 18 * dt;
+          obj.position.x -= dx * 0.0; // we move via world coords; approximate via local tile
+          // Move toward player in world: convert to tile-local
+          const local = d.worldToLocal(new THREE.Vector3(px, py, pz));
+          obj.position.x += (local.x - obj.position.x) * Math.min(1, 6 * dt);
+          obj.position.y += (local.y - obj.position.y) * Math.min(1, 6 * dt);
+          obj.position.z += (local.z - obj.position.z) * Math.min(1, 6 * dt);
+        }
+      }
+
+      // Spin coins
+      if (obj.userData.kind === 'coin') {
+        obj.rotation.y += dt * 6;
+      }
+
+      // Bobble power-ups
+      if (obj.userData.kind === 'powerup') {
+        obj.rotation.y += dt * 1.5;
+        obj.position.y = obj.userData.baseY + Math.sin(performance.now() * 0.003 + i) * 0.15;
+      }
+
+      // Update moving train
+      if (obj.userData.moving) {
+        obj.position.z += obj.userData.speed * dt;
+      }
+
+      // Quick AABB check — within neighborhood
+      const owpos = new THREE.Vector3();
+      obj.getWorldPosition(owpos);
+      const oz = owpos.z;
+      if (Math.abs(oz - pz) > (obj.userData.hd ?? 1) + 1.5) continue;
+
+      const ud = obj.userData;
+      const hit = aabbOverlap(
+        owpos.x, owpos.y, oz,
+        ud.hw ?? 0.5, ud.hh ?? 0.5, ud.hd ?? 0.5,
+        px, py, pz,
+        ph.hw, ph.hh, ph.hd,
+      );
+      if (!hit) continue;
+
+      if (ud.kind === 'coin') {
+        gameState.coins++;
+        gameState.score += 10 * gameState.multiplier;
+        advanceMission('coin');
+        spawnSparkle(owpos, 0xffd23f);
+        d.remove(obj);
+        HUD.coinCard.classList.remove('coin-flash');
+        void HUD.coinCard.offsetWidth;
+        HUD.coinCard.classList.add('coin-flash');
+        continue;
+      }
+      if (ud.kind === 'powerup') {
+        activatePower(ud.power);
+        d.remove(obj);
+        continue;
+      }
+      if (ud.kind === 'ramp') {
+        // Launch player up
+        if (playerState.y < 0.05) {
+          playerState.vy = JUMP_V * 1.1;
+          playerState.jumping = true;
+          playerState.rolling = false;
+          setRollingPose(false);
+        }
+        continue;
+      }
+      // Solid obstacle
+      if (invincible) {
+        // Smash power: destroy non-train obstacles
+        if (ud.kind !== 'train') {
+          spawnSparkle(owpos, 0xff3da6);
+          d.remove(obj);
+          continue;
+        } else {
+          // can't destroy train; trigger game over only if not jet
+          if (!jet) { triggerDeath(obj); return; }
+        }
+      } else {
+        // Determine if jump/roll evades
+        if (ud.kind === 'jump' && playerState.y > ud.hh + 0.1) continue;
+        if (ud.kind === 'low' && playerState.rolling) continue;
+        triggerDeath(obj);
+        return;
+      }
+    }
+  }
+}
+
+function triggerDeath(obj) {
+  if (!playerState.alive) return;
+  playerState.alive = false;
+  spawnSparkle(player.position.clone().add(new THREE.Vector3(0, 1, 0)), 0xff3da6);
+  // Knock guard into view fast
+  guard.userData.win = true;
+  setTimeout(showGameOver, 900);
+}
+
+function showGameOver() {
+  gameState.running = false;
+  if (gameState.score > gameState.best) {
+    gameState.best = Math.floor(gameState.score);
+    localStorage.setItem('subway-best', gameState.best);
+  }
+  HUD.finalScore.textContent = Math.floor(gameState.score);
+  HUD.finalCoins.textContent = gameState.coins;
+  HUD.finalBest.textContent = gameState.best;
+  HUD.gameover.classList.remove('hidden');
+}
+
+// ===== Main loop =====
+let lastTime = performance.now();
+function tick() {
+  const now = performance.now();
+  let dt = (now - lastTime) / 1000;
+  lastTime = now;
+  dt = Math.min(dt, 0.05);
+
+  const t = now * 0.001;
+
+  // Animate clouds drift always
+  clouds.position.x = Math.sin(t * 0.05) * 5;
+
+  if (gameState.running && !gameState.paused) {
+    updateGame(dt, t);
+  } else {
+    // gentle player anim on title
+    animatePlayer(dt, true);
+  }
+
+  updateFX(dt);
+  updateTrail(dt);
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+
+function updateGame(dt, t) {
+  gameState.elapsed += dt;
+
+  // Speed ramp
+  const target = Math.min(MAX_SPEED, BASE_SPEED + gameState.elapsed * SPEED_RAMP);
+  const speedMul = gameState.powerups.speed > 0 ? 1.5 : 1;
+  playerState.speed += (target * speedMul - playerState.speed) * Math.min(1, dt * 1.5);
+
+  // Score from distance
+  playerState.distance += playerState.speed * dt;
+  gameState.score += playerState.speed * dt * 1.0 * gameState.multiplier;
+  advanceMission('distance', playerState.speed * dt);
+
+  // Lateral smoothing
+  player.position.x += (playerState.targetX - player.position.x) * Math.min(1, 14 * dt);
+
+  // Vertical
+  if (gameState.powerups.jet > 0) {
+    // hold at altitude
+    const hover = 5;
+    playerState.y += (hover - playerState.y) * Math.min(1, 4 * dt);
+    playerState.vy = 0;
+    playerState.jumping = false;
+  } else if (gameState.powerups.hover > 0) {
+    const target = 0.6;
+    playerState.y += (target - playerState.y) * Math.min(1, 6 * dt);
+    playerState.vy = 0;
+    playerState.jumping = false;
+  } else {
+    playerState.vy += GRAVITY * dt;
+    playerState.y += playerState.vy * dt;
+    if (playerState.y <= 0) {
+      if (playerState.jumping && playerState.vy < 0) {
+        playerState.jumpsDone = (playerState.jumpsDone || 0) + 1;
+        advanceMission('jump');
+      }
+      playerState.y = 0;
+      playerState.vy = 0;
+      playerState.jumping = false;
+    }
+  }
+  player.position.y = playerState.y;
+
+  // Roll timer
+  if (playerState.rolling) {
+    playerState.rollTime -= dt;
+    if (playerState.rollTime <= 0) {
+      playerState.rolling = false;
+      setRollingPose(false);
+    }
+  }
+
+  // Animate player and chasers
+  animatePlayer(dt, true);
+  animateChasers(dt, t);
+
+  // Chasers follow behind unless death triggered
+  const guardTargetZ = playerState.alive ? -7 : -2;
+  guard.position.z += (guardTargetZ - guard.position.z) * Math.min(1, 2.5 * dt);
+  guard.position.x += (player.position.x - 1.2 - guard.position.x) * Math.min(1, 3 * dt);
+  dog.position.z += ((guardTargetZ + 1.5) - dog.position.z) * Math.min(1, 2.8 * dt);
+  dog.position.x += (player.position.x + 1.5 - dog.position.x) * Math.min(1, 3 * dt);
+
+  // Scroll world
+  const scroll = playerState.speed * dt;
+  for (const tile of tilePool) {
+    tile.position.z -= scroll;
+  }
+  // Skyline parallax
+  skylineL.position.z -= scroll * 0.4;
+  skylineR.position.z -= scroll * 0.4;
+  if (skylineL.position.z < -120) skylineL.position.z += 240;
+  if (skylineR.position.z < -120) skylineR.position.z += 240;
+
+  // Recycle tiles
+  for (const tile of tilePool) {
+    if (tile.position.z < -TILE_LEN - DESPAWN_BEHIND) {
+      // find max z and put behind it
+      let maxZ = -Infinity;
+      for (const o of tilePool) maxZ = Math.max(maxZ, o.position.z);
+      tile.position.z = maxZ + TILE_LEN;
+      clearTileDynamic(tile);
+      populateTile(tile, tile.position.z);
+    }
+  }
+
+  // Power-up timers
+  for (const kind of Object.keys(gameState.powerups)) {
+    if (gameState.powerups[kind] > 0) gameState.powerups[kind] -= dt;
+    if (gameState.powerups[kind] < 0) gameState.powerups[kind] = 0;
+  }
+  if (gameState.powerups.multiplier <= 0 && gameState.multiplier !== 1) {
+    gameState.multiplier = 1;
+    HUD.multiplier.classList.remove('show');
+  }
+  updatePowerupPills(dt);
+
+  // Speed boost trail
+  if (gameState.powerups.speed > 0 && Math.random() < 0.6) spawnTrail();
+
+  // Camera follow with subtle shake during high speed
+  const camTarget = new THREE.Vector3(player.position.x * 0.3, 6.2 + (playerState.y > 1 ? 1 : 0), player.position.z - 9);
+  camera.position.lerp(camTarget, Math.min(1, 4 * dt));
+  camera.lookAt(player.position.x * 0.2, 2 + player.position.y * 0.5, player.position.z + 8);
+
+  // Speed blur visual
+  if (playerState.speed > 30) HUD.speedBlur.classList.add('active');
+  else HUD.speedBlur.classList.remove('active');
+
+  if (playerState.alive) handleCollisions(dt);
+
+  updateHUD();
+}
+
+requestAnimationFrame(tick);
