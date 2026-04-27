@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#1d2671" />
+  <title>Subway Sprint</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="game-root">
+    <canvas id="game-canvas"></canvas>
+
+    <div id="speed-blur"></div>
+
+    <!-- HUD -->
+    <div id="hud" class="hidden">
+      <div class="hud-top">
+        <div class="hud-card score-card">
+          <div class="label">SCORE</div>
+          <div class="value" id="score">0</div>
+        </div>
+        <div class="hud-card coin-card">
+          <div class="coin-icon"></div>
+          <div class="value" id="coins">0</div>
+        </div>
+        <button class="pause-btn" id="pause-btn" aria-label="Pause">
+          <span></span><span></span>
+        </button>
+      </div>
+
+      <div class="mission-bar">
+        <div class="mission-text" id="mission-text">Collect 25 coins</div>
+        <div class="mission-progress"><div class="mission-fill" id="mission-fill"></div></div>
+      </div>
+
+      <div class="powerups" id="powerups"></div>
+
+      <div class="multiplier" id="multiplier-badge">
+        <span id="multiplier-text">x2</span>
+      </div>
+
+      <!-- Touch zones (invisible, controls explained on title) -->
+      <div class="touch-area" id="touch-area"></div>
+    </div>
+
+    <!-- Title screen -->
+    <div id="title-screen" class="overlay">
+      <div class="title-bg"></div>
+      <div class="title-content">
+        <div class="logo">
+          <div class="logo-line">SUBWAY</div>
+          <div class="logo-line accent">SPRINT</div>
+        </div>
+        <p class="tagline">Dodge. Dash. Collect.</p>
+
+        <div class="character-preview" id="character-preview">
+          <div class="char-shadow"></div>
+        </div>
+
+        <button class="big-btn" id="play-btn">
+          <span>TAP TO PLAY</span>
+        </button>
+
+        <div class="controls-hint">
+          <div class="hint"><span class="key">⇦ ⇨</span> swipe / arrows — change lane</div>
+          <div class="hint"><span class="key">⇧</span> swipe up / ↑ — jump</div>
+          <div class="hint"><span class="key">⇩</span> swipe down / ↓ — roll</div>
+        </div>
+
+        <div class="best-row">Best: <span id="best-score">0</span></div>
+      </div>
+    </div>
+
+    <!-- Pause overlay -->
+    <div id="pause-screen" class="overlay hidden">
+      <div class="dim"></div>
+      <div class="panel">
+        <h2>PAUSED</h2>
+        <button class="big-btn" id="resume-btn"><span>RESUME</span></button>
+        <button class="ghost-btn" id="quit-btn">QUIT TO MENU</button>
+      </div>
+    </div>
+
+    <!-- Game Over overlay -->
+    <div id="gameover-screen" class="overlay hidden">
+      <div class="dim"></div>
+      <div class="panel">
+        <h2>BUSTED!</h2>
+        <div class="result-row"><div class="r-label">Score</div><div class="r-val" id="final-score">0</div></div>
+        <div class="result-row"><div class="r-label">Coins</div><div class="r-val" id="final-coins">0</div></div>
+        <div class="result-row best"><div class="r-label">Best</div><div class="r-val" id="final-best">0</div></div>
+        <button class="big-btn" id="retry-btn"><span>RUN AGAIN</span></button>
+        <button class="ghost-btn" id="menu-btn">MAIN MENU</button>
+      </div>
+    </div>
+
+    <!-- Coin pickup popup -->
+    <div id="popup-layer"></div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
+  <script type="module" src="game.js"></script>
+</body>
+</html>
