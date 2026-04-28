@@ -1,5 +1,162 @@
 import * as THREE from 'three';
 
+// ===== Audio (WebAudio synthesis — no external assets) =====
+const audio = (() => {
+  let ctx = null;
+  let musicGain = null;
+  let masterGain = null;
+  let musicNodes = [];
+  let musicTimer = 0;
+  let musicStep = 0;
+  let muted = false;
+
+  function init() {
+    if (ctx) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    ctx = new Ctx();
+    masterGain = ctx.createGain();
+    masterGain.gain.value = 0.5;
+    masterGain.connect(ctx.destination);
+    musicGain = ctx.createGain();
+    musicGain.gain.value = 0.18;
+    musicGain.connect(masterGain);
+  }
+
+  function resume() { if (ctx && ctx.state === 'suspended') ctx.resume(); }
+
+  function blip({ freq = 600, dur = 0.1, type = 'square', vol = 0.25, slide = 0, attack = 0.005 } = {}) {
+    if (!ctx || muted) return;
+    const t0 = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t0);
+    if (slide) osc.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t0 + dur);
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(g); g.connect(masterGain);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.05);
+  }
+
+  function noise({ dur = 0.2, vol = 0.3, lp = 1200 } = {}) {
+    if (!ctx || muted) return;
+    const t0 = ctx.currentTime;
+    const buf = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate);
+    const ch = buf.getChannelData(0);
+    for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / ch.length);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = lp;
+    const g = ctx.createGain();
+    g.gain.value = vol;
+    src.connect(filter); filter.connect(g); g.connect(masterGain);
+    src.start(t0);
+  }
+
+  const sfx = {
+    coin: () => blip({ freq: 1100, dur: 0.09, type: 'triangle', vol: 0.22, slide: 600 }),
+    jump: () => blip({ freq: 320, dur: 0.18, type: 'square', vol: 0.18, slide: 500 }),
+    roll: () => noise({ dur: 0.18, vol: 0.18, lp: 700 }),
+    powerup: () => {
+      blip({ freq: 440, dur: 0.12, type: 'triangle', vol: 0.22, slide: 300 });
+      setTimeout(() => blip({ freq: 740, dur: 0.14, type: 'triangle', vol: 0.22, slide: 400 }), 90);
+      setTimeout(() => blip({ freq: 1100, dur: 0.18, type: 'triangle', vol: 0.22, slide: 600 }), 180);
+    },
+    hit: () => {
+      noise({ dur: 0.4, vol: 0.45, lp: 600 });
+      blip({ freq: 110, dur: 0.45, type: 'sawtooth', vol: 0.3, slide: -60 });
+    },
+    lane: () => blip({ freq: 540, dur: 0.06, type: 'sine', vol: 0.12, slide: 200 }),
+    mission: () => {
+      blip({ freq: 660, dur: 0.1, type: 'triangle', vol: 0.2 });
+      setTimeout(() => blip({ freq: 990, dur: 0.18, type: 'triangle', vol: 0.22 }), 120);
+    },
+  };
+
+  // Simple looping music: 16-step bass + arp pattern in C minor pentatonic
+  const NOTES = { C2: 65.41, Eb2: 77.78, F2: 87.31, G2: 98.0, Bb2: 116.54, C3: 130.81, Eb3: 155.56, F3: 174.61, G3: 196.0, Bb3: 233.08, C4: 261.63, Eb4: 311.13, G4: 392.0 };
+  const bassPattern = ['C2','C2','G2','C2', 'Bb2','C2','G2','F2', 'Eb2','C2','G2','F2', 'Bb2','C2','G2','C2'];
+  const arpPattern  = ['C4','Eb4','G4','Eb4', 'F3','Bb3','C4','Bb3', 'Eb3','G3','Bb3','G3', 'F3','Bb3','C4','Eb4'];
+  const STEP_DUR = 0.18;
+
+  function scheduleStep(step, when) {
+    if (!ctx || muted) return;
+    const bassF = NOTES[bassPattern[step % 16]];
+    const arpF  = NOTES[arpPattern[step % 16]];
+    // bass
+    const o1 = ctx.createOscillator(); const g1 = ctx.createGain();
+    o1.type = 'triangle'; o1.frequency.value = bassF;
+    g1.gain.setValueAtTime(0, when);
+    g1.gain.linearRampToValueAtTime(0.55, when + 0.01);
+    g1.gain.exponentialRampToValueAtTime(0.001, when + STEP_DUR * 0.95);
+    o1.connect(g1); g1.connect(musicGain);
+    o1.start(when); o1.stop(when + STEP_DUR);
+    // arp (only every other step for groove)
+    if (step % 2 === 0) {
+      const o2 = ctx.createOscillator(); const g2 = ctx.createGain();
+      o2.type = 'square'; o2.frequency.value = arpF;
+      g2.gain.setValueAtTime(0, when);
+      g2.gain.linearRampToValueAtTime(0.18, when + 0.005);
+      g2.gain.exponentialRampToValueAtTime(0.001, when + STEP_DUR * 0.6);
+      o2.connect(g2); g2.connect(musicGain);
+      o2.start(when); o2.stop(when + STEP_DUR);
+    }
+    // hi-hat-like noise on offbeats
+    if (step % 2 === 1) {
+      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.05, ctx.sampleRate);
+      const ch = buf.getChannelData(0);
+      for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / ch.length);
+      const src = ctx.createBufferSource(); src.buffer = buf;
+      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 4000;
+      const g = ctx.createGain(); g.gain.value = 0.12;
+      src.connect(hp); hp.connect(g); g.connect(musicGain);
+      src.start(when);
+    }
+    musicNodes.push({ stop: when + STEP_DUR + 0.1 });
+  }
+
+  let musicRunning = false;
+  function startMusic() {
+    if (!ctx || musicRunning || muted) return;
+    musicRunning = true;
+    musicGain.gain.cancelScheduledValues(ctx.currentTime);
+    musicGain.gain.setValueAtTime(0.18, ctx.currentTime);
+    musicStep = 0;
+    musicTimer = ctx.currentTime + 0.05;
+    pump();
+  }
+  function pump() {
+    if (!musicRunning || !ctx) return;
+    const now = ctx.currentTime;
+    while (musicTimer < now + 0.4) {
+      scheduleStep(musicStep, musicTimer);
+      musicTimer += STEP_DUR;
+      musicStep++;
+    }
+    setTimeout(pump, 100);
+  }
+  function stopMusic() {
+    if (!ctx || !musicRunning) return;
+    musicRunning = false;
+    musicGain.gain.cancelScheduledValues(ctx.currentTime);
+    musicGain.gain.setValueAtTime(musicGain.gain.value, ctx.currentTime);
+    musicGain.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
+  }
+
+  return {
+    init, resume,
+    play: (name) => sfx[name] && sfx[name](),
+    startMusic, stopMusic,
+    setMuted: v => { muted = v; if (v) stopMusic(); },
+    isMuted: () => muted,
+  };
+})();
+
 // ===== Constants =====
 const LANE_X = [-2.4, 0, 2.4];
 const GRAVITY = -55;
@@ -235,6 +392,7 @@ const playerState = {
   jet: false,
   speed: BASE_SPEED,
   distance: 0,
+  tilt: 0,
 };
 
 function animatePlayer(dt, running) {
@@ -948,6 +1106,8 @@ function changeLane(dir) {
   if (next === playerState.laneIndex) return;
   playerState.laneIndex = next;
   playerState.targetX = LANE_X[next];
+  playerState.tilt = dir > 0 ? -0.35 : 0.35;
+  audio.play('lane');
 }
 function jump() {
   if (!playerState.alive || gameState.paused || !gameState.running) return;
@@ -956,6 +1116,7 @@ function jump() {
     playerState.jumping = true;
     playerState.rolling = false;
     setRollingPose(false);
+    audio.play('jump');
   }
 }
 function roll() {
@@ -969,6 +1130,7 @@ function roll() {
     playerState.rolling = true;
     playerState.rollTime = ROLL_TIME;
     setRollingPose(true);
+    audio.play('roll');
   }
 }
 
@@ -1064,6 +1226,13 @@ document.getElementById('menu-btn').addEventListener('click', () => {
   HUD.best.textContent = gameState.best;
 });
 document.getElementById('pause-btn').addEventListener('click', togglePause);
+const muteBtn = document.getElementById('mute-btn');
+muteBtn.addEventListener('click', () => {
+  const muted = !audio.isMuted();
+  audio.setMuted(muted);
+  muteBtn.dataset.muted = String(muted);
+  if (!muted && gameState.running) audio.startMusic();
+});
 document.getElementById('resume-btn').addEventListener('click', togglePause);
 document.getElementById('quit-btn').addEventListener('click', () => {
   gameState.paused = false;
@@ -1085,6 +1254,15 @@ function startGame() {
   HUD.pause.classList.add('hidden');
   HUD.root.classList.remove('hidden');
 
+  // Hide hit feedback from any prior run
+  document.getElementById('hit-flash').classList.remove('active');
+  document.getElementById('busted-stamp').classList.remove('show');
+
+  // Audio needs a user gesture to start (we get one from the play tap)
+  audio.init();
+  audio.resume();
+  audio.startMusic();
+
   // reset
   resetWorld();
   gameState.running = true;
@@ -1095,6 +1273,8 @@ function startGame() {
   gameState.elapsed = 0;
   gameState.startTime = performance.now();
   gameState.powerups = { magnet: 0, multiplier: 0, speed: 0, hover: 0, jet: 0 };
+  gameState.slowmo = 0;
+  cameraShake.t = 0; cameraShake.amp = 0;
   pickMission();
   updateHUD();
   HUD.powerups.innerHTML = '';
@@ -1133,6 +1313,7 @@ function advanceMission(kind, amount = 1) {
     showPopup(window.innerWidth / 2, window.innerHeight / 2, 'MISSION +500', true);
     setTimeout(pickMission, 1200);
     gameState.mission.kind = '__done__';
+    audio.play('mission');
   }
 }
 
@@ -1220,6 +1401,7 @@ function activatePower(kind) {
     kind === 'hover' ? 0x45e07b : 0xff3da6);
   showPopup(window.innerWidth / 2, window.innerHeight / 2 - 60, label(kind), true);
   advanceMission('powerup');
+  audio.play('powerup');
 }
 
 function label(kind) {
@@ -1326,6 +1508,7 @@ function handleCollisions(dt) {
         HUD.coinCard.classList.remove('coin-flash');
         void HUD.coinCard.offsetWidth;
         HUD.coinCard.classList.add('coin-flash');
+        audio.play('coin');
         continue;
       }
       if (ud.kind === 'powerup') {
@@ -1368,11 +1551,40 @@ function handleCollisions(dt) {
 function triggerDeath(obj) {
   if (!playerState.alive) return;
   playerState.alive = false;
-  spawnSparkle(player.position.clone().add(new THREE.Vector3(0, 1, 0)), 0xff3da6);
+
+  // Visual hit feedback
+  const flash = document.getElementById('hit-flash');
+  flash.classList.remove('active'); void flash.offsetWidth; flash.classList.add('active');
+  const stamp = document.getElementById('busted-stamp');
+  stamp.classList.remove('show'); void stamp.offsetWidth; stamp.classList.add('show');
+
+  // Camera shake + brief slow-mo
+  cameraShake.t = 0.55;
+  cameraShake.amp = 0.55;
+  gameState.slowmo = 0.6;
+
+  // FX burst at the impact point
+  if (obj) {
+    const p = new THREE.Vector3();
+    obj.getWorldPosition(p);
+    spawnSparkle(p.clone().add(new THREE.Vector3(0, 0.5, 0)), 0xff3da6);
+  }
+  spawnSparkle(player.position.clone().add(new THREE.Vector3(0, 1.4, 0)), 0xffffff);
+
+  // Slam player flat — stop run cycle visibly
+  player.userData.parts.armL.rotation.x = -1.2;
+  player.userData.parts.armR.rotation.x = -1.2;
+  setRollingPose(false);
+
+  audio.play('hit');
+  audio.stopMusic();
+
   // Knock guard into view fast
   guard.userData.win = true;
-  setTimeout(showGameOver, 900);
+  setTimeout(showGameOver, 1100);
 }
+
+const cameraShake = { t: 0, amp: 0 };
 
 function showGameOver() {
   gameState.running = false;
@@ -1399,8 +1611,16 @@ function tick() {
   // Animate clouds drift always
   clouds.position.x = Math.sin(t * 0.05) * 5;
 
+  // Slow-mo on death dramatic moment
+  if (gameState.slowmo > 0) {
+    dt *= 0.25;
+    gameState.slowmo -= dt;
+  }
+
   if (gameState.running && !gameState.paused) {
     updateGame(dt, t);
+  } else if (gameState.running && gameState.paused) {
+    // paused: don't animate world but let camera settle if needed
   } else {
     // gentle player anim on title
     animatePlayer(dt, true);
@@ -1426,8 +1646,15 @@ function updateGame(dt, t) {
   gameState.score += playerState.speed * dt * 1.0 * gameState.multiplier;
   advanceMission('distance', playerState.speed * dt);
 
-  // Lateral smoothing
+  // Lateral smoothing + lean into the dodge
   player.position.x += (playerState.targetX - player.position.x) * Math.min(1, 14 * dt);
+  if (playerState.tilt !== 0) {
+    player.rotation.z += (playerState.tilt - player.rotation.z) * Math.min(1, 12 * dt);
+    playerState.tilt *= Math.max(0, 1 - 5 * dt);
+    if (Math.abs(playerState.tilt) < 0.02) playerState.tilt = 0;
+  } else {
+    player.rotation.z += (0 - player.rotation.z) * Math.min(1, 8 * dt);
+  }
 
   // Vertical
   if (gameState.powerups.jet > 0) {
@@ -1513,9 +1740,15 @@ function updateGame(dt, t) {
   // Speed boost trail
   if (gameState.powerups.speed > 0 && Math.random() < 0.6) spawnTrail();
 
-  // Camera follow with subtle shake during high speed
+  // Camera follow with subtle shake on impact
   const camTarget = new THREE.Vector3(player.position.x * 0.3, 6.2 + (playerState.y > 1 ? 1 : 0), player.position.z - 9);
   camera.position.lerp(camTarget, Math.min(1, 4 * dt));
+  if (cameraShake.t > 0) {
+    cameraShake.t -= dt;
+    const a = cameraShake.amp * Math.max(0, cameraShake.t / 0.55);
+    camera.position.x += (Math.random() - 0.5) * a * 2;
+    camera.position.y += (Math.random() - 0.5) * a * 1.4;
+  }
   camera.lookAt(player.position.x * 0.2, 2 + player.position.y * 0.5, player.position.z + 8);
 
   // Speed blur visual

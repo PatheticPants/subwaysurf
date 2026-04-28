@@ -47,6 +47,55 @@ body {
 }
 #speed-blur.active { opacity: 1; }
 
+/* hit-flash overlay — bright red pulse on collision */
+#hit-flash {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(255,40,40,0.5) 0%, rgba(180,0,0,0.85) 100%);
+  opacity: 0;
+  z-index: 11;
+}
+#hit-flash.active {
+  animation: hitFlash 0.5s ease-out forwards;
+}
+@keyframes hitFlash {
+  0%   { opacity: 0; }
+  15%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* "BUSTED!" stamp shown the instant the player is caught */
+#busted-stamp {
+  position: absolute;
+  top: 38%; left: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  font-size: 64px;
+  font-weight: 900;
+  letter-spacing: 6px;
+  color: #fff;
+  text-shadow:
+    0 0 24px #ff3da6,
+    4px 4px 0 #800040,
+    -2px -2px 0 #800040;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 13;
+  -webkit-text-stroke: 2px #800040;
+}
+#busted-stamp.show {
+  animation: bustedStamp 0.8s cubic-bezier(.2,1.5,.4,1) forwards;
+}
+@keyframes bustedStamp {
+  0%   { opacity: 0; transform: translate(-50%, -50%) rotate(-12deg) scale(3); }
+  30%  { opacity: 1; transform: translate(-50%, -50%) rotate(-6deg) scale(1.1); }
+  60%  { opacity: 1; transform: translate(-50%, -50%) rotate(-6deg) scale(1.0); }
+  100% { opacity: 1; transform: translate(-50%, -50%) rotate(-6deg) scale(1.0); }
+}
+
+@media (max-width: 480px) {
+  #busted-stamp { font-size: 48px; letter-spacing: 4px; }
+}
+
 /* === HUD === */
 #hud {
   position: absolute; inset: 0;
@@ -60,6 +109,7 @@ body {
   top: calc(var(--safe-top) + 14px);
   left: 14px; right: 14px;
   display: flex; align-items: center; gap: 10px;
+  z-index: 12;
 }
 .hud-card {
   background: linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.35));
@@ -98,8 +148,8 @@ body {
   color: #8a5800; font-weight: 900; font-size: 14px;
 }
 
-.pause-btn {
-  margin-left: auto;
+.pause-btn,
+.mute-btn {
   width: 44px; height: 44px;
   border-radius: 14px;
   background: rgba(0,0,0,0.55);
@@ -108,11 +158,20 @@ body {
   gap: 4px;
   pointer-events: auto;
   cursor: pointer;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 800;
 }
+.pause-btn { margin-left: auto; }
 .pause-btn span {
   width: 5px; height: 18px;
   background: #fff; border-radius: 2px;
 }
+.mute-btn { margin-left: auto; position: relative; padding: 0; }
+.mute-btn .mute-off { display: none; color: #ff6464; }
+.mute-btn[data-muted="true"] .mute-on { display: none; }
+.mute-btn[data-muted="true"] .mute-off { display: inline; }
+.mute-btn + .pause-btn { margin-left: 0; }
 
 .mission-bar {
   position: absolute;

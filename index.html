@@ -14,6 +14,8 @@
     <canvas id="game-canvas"></canvas>
 
     <div id="speed-blur"></div>
+    <div id="hit-flash"></div>
+    <div id="busted-stamp">BUSTED!</div>
 
     <!-- HUD -->
     <div id="hud" class="hidden">
@@ -26,6 +28,10 @@
           <div class="coin-icon"></div>
           <div class="value" id="coins">0</div>
         </div>
+        <button class="mute-btn" id="mute-btn" aria-label="Mute" data-muted="false">
+          <span class="mute-on">♪</span>
+          <span class="mute-off">×</span>
+        </button>
         <button class="pause-btn" id="pause-btn" aria-label="Pause">
           <span></span><span></span>
         </button>
