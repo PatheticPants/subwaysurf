@@ -407,17 +407,28 @@ function buildTile() {
   }
 
   // Overhead wire frame
-  const archCount = 3;
+  // Overhead wire frame — kept high above camera (cam.y ≈ 6.2) so it
+  // doesn't slice through the playfield view. Thin pylons + a single
+  // longitudinal cable per side sells the look without blocking sight.
+  const archCount = 2;
   for (let i = 0; i < archCount; i++) {
-    const arch = boxMesh(17, 0.18, 0.22, 0x222233, { cast: false });
-    arch.position.set(0, 6.4, -TILE_LEN / 2 + 6 + i * (TILE_LEN / archCount));
-    tile.add(arch);
-    // wires
-    for (const lx of LANE_X) {
-      const wire = boxMesh(0.04, 0.04, TILE_LEN / archCount + 0.5, 0x111122, { cast: false });
-      wire.position.set(lx, 6.0, -TILE_LEN / 2 + 6 + i * (TILE_LEN / archCount) + (TILE_LEN / archCount) / 2);
-      tile.add(wire);
+    const archZ = -TILE_LEN / 2 + 10 + i * (TILE_LEN / archCount);
+    // Pylons on the far edges, behind the wall trim
+    for (const side of [-1, 1]) {
+      const pylon = boxMesh(0.18, 4, 0.18, 0x222233, { cast: false });
+      pylon.position.set(side * 8.4, 7.0, archZ);
+      tile.add(pylon);
     }
+    // Thin top-bar between pylons
+    const top = boxMesh(17, 0.08, 0.1, 0x222233, { cast: false });
+    top.position.set(0, 9.0, archZ);
+    tile.add(top);
+  }
+  // Long parallel cables along the tile length, off to the sides
+  for (const side of [-1, 1]) {
+    const cable = boxMesh(0.04, 0.04, TILE_LEN, 0x111122, { cast: false });
+    cable.position.set(side * 7.5, 8.6, 0);
+    tile.add(cable);
   }
 
   // Container for spawned obstacles/coins/powerups
@@ -466,7 +477,7 @@ function makeBarrier() {
   const legL = boxMesh(0.18, 0.5, 0.18, 0x444455);
   legL.position.set(-0.85, 0.25, 0); g.add(legL);
   const legR = legL.clone(); legR.position.x = 0.85; g.add(legR);
-  g.userData = { kind: 'jump', hw: 1.05, hh: 0.55, hd: 0.3, baseY: 0.55 };
+  g.userData = { kind: 'jump', hw: 1.05, hh: 0.5, hd: 0.3, baseY: 0, cy: 0.5 };
   return g;
 }
 
@@ -482,7 +493,7 @@ function makeSign() {
   // Text bar
   const bar = boxMesh(2.0, 0.18, 0.2, 0xffffff);
   bar.position.y = 2.55; g.add(bar);
-  g.userData = { kind: 'low', hw: 1.2, hh: 0.5, hd: 0.2, baseY: 2.55 };
+  g.userData = { kind: 'low', hw: 1.2, hh: 0.45, hd: 0.2, baseY: 0, cy: 2.55 };
   return g;
 }
 
@@ -504,7 +515,7 @@ function makeCone() {
   const base = boxMesh(0.7, 0.08, 0.7, 0x222233);
   base.position.y = 0.04;
   g.add(base);
-  g.userData = { kind: 'jump', hw: 0.4, hh: 0.45, hd: 0.4, baseY: 0.4 };
+  g.userData = { kind: 'jump', hw: 0.4, hh: 0.4, hd: 0.4, baseY: 0, cy: 0.4 };
   return g;
 }
 
@@ -557,7 +568,7 @@ function makeTrain(length = 22) {
     g.add(wh);
   }
 
-  g.userData = { kind: 'train', hw: 1.05, hh: 1.3, hd: length / 2, baseY: 1.4, length };
+  g.userData = { kind: 'train', hw: 1.05, hh: 1.3, hd: length / 2, baseY: 0, cy: 1.4, length };
   return g;
 }
 
@@ -588,7 +599,7 @@ function makeRamp() {
   const stripe = boxMesh(2.05, 0.06, 0.4, 0x111133);
   stripe.position.set(0, 0.32, 1.5);
   g.add(stripe);
-  g.userData = { kind: 'ramp', hw: 1.1, hh: 0.3, hd: 1.7, baseY: 0.15 };
+  g.userData = { kind: 'ramp', hw: 1.1, hh: 0.5, hd: 1.7, baseY: 0, cy: 0.5 };
   return g;
 }
 
@@ -602,7 +613,7 @@ function makeCoin() {
   const m = new THREE.Mesh(coinGeometry, coinMaterial);
   m.rotation.x = Math.PI / 2;
   m.castShadow = false;
-  m.userData = { kind: 'coin' };
+  m.userData = { kind: 'coin', hw: 0.4, hh: 0.4, hd: 0.4, cy: 0 };
   return m;
 }
 
@@ -668,7 +679,7 @@ function makePowerUp(kind) {
   ring.position.y = -0.4;
   g.add(ring);
 
-  g.userData = { kind: 'powerup', power: kind, hw: 0.6, hh: 0.6, hd: 0.6, baseY: 1.6 };
+  g.userData = { kind: 'powerup', power: kind, hw: 0.6, hh: 0.6, hd: 0.6, baseY: 1.6, cy: 0 };
   return g;
 }
 
@@ -990,8 +1001,8 @@ touchArea.addEventListener('touchend', (e) => {
 window.addEventListener('keydown', (e) => {
   if (e.repeat) return;
   switch (e.key) {
-    case 'ArrowLeft': case 'a': case 'A': changeLane(-1); break;
-    case 'ArrowRight': case 'd': case 'D': changeLane(1); break;
+    case 'ArrowLeft': case 'a': case 'A': changeLane(1); break;
+    case 'ArrowRight': case 'd': case 'D': changeLane(-1); break;
     case 'ArrowUp': case 'w': case 'W': case ' ': jump(); break;
     case 'ArrowDown': case 's': case 'S': roll(); break;
     case 'p': case 'P': case 'Escape': togglePause(); break;
@@ -1262,17 +1273,15 @@ function handleCollisions(dt) {
       const earlyZ = (obj.userData.hd ?? 1) + 4;
       if (Math.abs(dz) > earlyZ && obj.userData.kind !== 'coin' && obj.userData.kind !== 'powerup') continue;
 
-      // Magnet pulls coins toward player
+      // Magnet pulls coins toward player (works in tile-local coords)
       if (obj.userData.kind === 'coin' && magnetActive) {
         const dist = Math.hypot(dx, tmpVec.y - py, dz);
         if (dist < magnetR) {
-          const speed = 18 * dt;
-          obj.position.x -= dx * 0.0; // we move via world coords; approximate via local tile
-          // Move toward player in world: convert to tile-local
           const local = d.worldToLocal(new THREE.Vector3(px, py, pz));
-          obj.position.x += (local.x - obj.position.x) * Math.min(1, 6 * dt);
-          obj.position.y += (local.y - obj.position.y) * Math.min(1, 6 * dt);
-          obj.position.z += (local.z - obj.position.z) * Math.min(1, 6 * dt);
+          const k = Math.min(1, 6 * dt);
+          obj.position.x += (local.x - obj.position.x) * k;
+          obj.position.y += (local.y - obj.position.y) * k;
+          obj.position.z += (local.z - obj.position.z) * k;
         }
       }
 
@@ -1299,8 +1308,9 @@ function handleCollisions(dt) {
       if (Math.abs(oz - pz) > (obj.userData.hd ?? 1) + 1.5) continue;
 
       const ud = obj.userData;
+      const cyWorld = owpos.y + (ud.cy ?? 0);
       const hit = aabbOverlap(
-        owpos.x, owpos.y, oz,
+        owpos.x, cyWorld, oz,
         ud.hw ?? 0.5, ud.hh ?? 0.5, ud.hd ?? 0.5,
         px, py, pz,
         ph.hw, ph.hh, ph.hd,
