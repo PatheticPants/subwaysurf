@@ -1133,8 +1133,147 @@ function placeCoinRing(d, lane, centerZ, vertical = false) {
   );
   ring.position.set(LANE_X[lane], 1.4, centerZ);
   if (!vertical) ring.rotation.x = Math.PI / 2;
-  ring.userData = { kind: 'decor' };
+  ring.userData = { kind: 'decor', spin: true };
   d.add(ring);
+}
+
+// ===== Set-pieces (decor only) =====
+function makeTunnel() {
+  // A wide arched tunnel mouth the player runs through. Built as a
+  // U-shape so we don't need geometry CSG. About 12 m deep.
+  const g = new THREE.Group();
+  const depth = 12;
+  // Top ceiling slab
+  const ceil = boxMesh(20, 0.8, depth, 0x1a1530);
+  ceil.position.y = 8.8;
+  g.add(ceil);
+  // Pillars
+  for (const side of [-1, 1]) {
+    const pillar = boxMesh(1.6, 9.0, depth, 0x2c2444);
+    pillar.position.set(side * 9.0, 4.5, 0);
+    g.add(pillar);
+  }
+  // Brick arch on the front face (closest to camera approach)
+  const arch = boxMesh(20, 1.2, 0.6, 0xb87333);
+  arch.position.set(0, 8.4, depth / 2);
+  g.add(arch);
+  // Tunnel-mouth keystone
+  const key = boxMesh(2, 1.4, 0.7, 0xffd23f);
+  key.position.set(0, 8.5, depth / 2 + 0.05);
+  g.add(key);
+  // Inner glow strips along the ceiling
+  for (let i = 0; i < 4; i++) {
+    const strip = boxMesh(2.4, 0.06, 0.4, 0xffd23f, { emissive: 0xffd23f, emissiveI: 1.4, cast: false });
+    strip.position.set(0, 8.3, -depth / 2 + 1 + i * (depth / 4));
+    g.add(strip);
+  }
+  g.userData = { kind: 'decor' };
+  return g;
+}
+
+function makeBridge() {
+  // Overhead bridge crossing the track.
+  const g = new THREE.Group();
+  const span = boxMesh(22, 0.6, 6, 0x6c7480);
+  span.position.y = 9.5;
+  g.add(span);
+  // Side rails
+  for (const side of [-1, 1]) {
+    const rail = boxMesh(22, 0.9, 0.18, 0xffd23f);
+    rail.position.set(0, 10.2, side * 2.9);
+    g.add(rail);
+    // Posts
+    for (let i = 0; i < 8; i++) {
+      const p = boxMesh(0.18, 0.9, 0.18, 0x222233);
+      p.position.set(-10.5 + i * 3, 10.0, side * 2.9);
+      g.add(p);
+    }
+  }
+  // Support pillars on each side at ground
+  for (const side of [-1, 1]) {
+    const support = boxMesh(1.6, 9.5, 1.2, 0x44484f);
+    support.position.set(side * 9.5, 4.7, 0);
+    g.add(support);
+  }
+  // Tiny pedestrian silhouettes walking across (purely visual)
+  for (let i = 0; i < 4; i++) {
+    const ped = boxMesh(0.35, 0.8, 0.25, [0xff3da6, 0x2ee6ff, 0xffd23f, 0x45e07b][i]);
+    ped.position.set(-6 + i * 4, 10.4, (i % 2 ? -1.5 : 1.5));
+    ped.userData.basePos = ped.position.clone();
+    g.add(ped);
+  }
+  g.userData = { kind: 'decor' };
+  return g;
+}
+
+function makeStation() {
+  // Two raised platforms on either side of the track, with NPCs
+  // waiting and benches/lamps. Length matches half a tile.
+  const g = new THREE.Group();
+  const len = 24;
+  for (const side of [-1, 1]) {
+    // Platform slab — raised about 1.1 m
+    const slab = boxMesh(3, 1.1, len, 0xe7d9b8);
+    slab.position.set(side * 6.5, 0.55, 0);
+    g.add(slab);
+    // Yellow safety stripe along the inner edge
+    const stripe = boxMesh(0.3, 0.05, len, 0xffd23f, { emissive: 0xffd23f, emissiveI: 0.5 });
+    stripe.position.set(side * 5.05, 1.13, 0);
+    g.add(stripe);
+    // Low wall behind the platform
+    const back = boxMesh(0.5, 3, len, 0xc0a070);
+    back.position.set(side * 7.7, 2.5, 0);
+    g.add(back);
+    // Roof canopy
+    const canopy = boxMesh(3.4, 0.18, len, 0x6c7480);
+    canopy.position.set(side * 6.4, 5.3, 0);
+    g.add(canopy);
+    // Roof supports
+    for (let i = 0; i < 4; i++) {
+      const sup = boxMesh(0.18, 4.5, 0.18, 0x222233);
+      sup.position.set(side * 5.3, 3.0, -len / 2 + 3 + i * (len / 4));
+      g.add(sup);
+    }
+    // Station sign
+    const sign = boxMesh(2.6, 0.8, 0.12, 0x2350a8, { emissive: 0x2350a8, emissiveI: 0.4 });
+    sign.position.set(side * 5.7, 4.0, 0);
+    g.add(sign);
+    const signText = boxMesh(2.0, 0.18, 0.14, 0xffffff);
+    signText.position.set(side * 5.7, 4.0, 0.01);
+    g.add(signText);
+    // Bench
+    const bench = boxMesh(2, 0.45, 0.6, 0xb87333);
+    bench.position.set(side * 6.5, 1.4, -len / 4);
+    g.add(bench);
+    const benchBack = boxMesh(2, 0.7, 0.12, 0xb87333);
+    benchBack.position.set(side * 6.5, 1.85, -len / 4 - 0.25);
+    g.add(benchBack);
+  }
+  // NPCs waiting on platforms with arms that wave
+  const wavers = [];
+  const colors = [0xff3da6, 0x2ee6ff, 0xffd23f, 0x45e07b, 0x8a4dff, 0xff7a1a];
+  for (let i = 0; i < 6; i++) {
+    const side = i < 3 ? -1 : 1;
+    const npc = new THREE.Group();
+    const c = colors[i];
+    const torso = boxMesh(0.55, 0.8, 0.4, c);
+    torso.position.y = 1.7; npc.add(torso);
+    const head = boxMesh(0.45, 0.45, 0.45, 0xffd2a6);
+    head.position.y = 2.32; npc.add(head);
+    const legL = boxMesh(0.25, 0.85, 0.3, 0x222233);
+    legL.position.set(-0.13, 0.95, 0); npc.add(legL);
+    const legR = legL.clone(); legR.position.x = 0.13; npc.add(legR);
+    // Waving arm
+    const arm = boxMesh(0.2, 0.7, 0.2, c);
+    arm.position.set(side * 0.4, 2.0, 0);
+    arm.userData.phase = i * 0.7;
+    npc.add(arm);
+    wavers.push(arm);
+    npc.position.set(side * 6.5, 1.1, -8 + (i % 3) * 6);
+    g.add(npc);
+  }
+  g.userData = { kind: 'decor', wave: wavers };
+  return g;
 }
 
 function pickGroundObstacle() {
@@ -1164,9 +1303,28 @@ function populateTile(tile, zStart) {
   const isFirst = zStart < 30;
   if (isFirst) return;
 
-  // Density — currently uniform; the wave system in commit 3 will
-  // modulate this. Read from gameState if it's been set up.
+  // Density: read from gameState (the wave system updates this).
   const density = (gameState && gameState.density) || 1.0;
+
+  // Set-pieces — at most one per tile. Tunnels suppress mid-tile
+  // ground obstacles where they'd clip; bridges and stations don't.
+  let setPiece = null;
+  let setPieceZSpan = null; // [z0, z1] of suppression zone
+  const sp = Math.random();
+  if (sp < 0.10) {
+    setPiece = makeTunnel();
+    setPiece.position.set(0, 0, 0);
+    setPieceZSpan = [-6, 6]; // suppress obstacles in the 12m mouth
+  } else if (sp < 0.20) {
+    setPiece = makeBridge();
+    setPiece.position.set(0, 0, (Math.random() - 0.5) * (TILE_LEN - 8));
+  } else if (sp < 0.32) {
+    setPiece = makeStation();
+    setPiece.position.set(0, 0, 0);
+  }
+  if (setPiece) {
+    tile.userData.dynamic.add(setPiece);
+  }
 
   // Trains: 35% chance of a long train, 12% chance of an open-train.
   let trainLane = -1;
@@ -1194,6 +1352,9 @@ function populateTile(tile, zStart) {
   const slotCount = 4;
   for (let s = 0; s < slotCount; s++) {
     const slotZ = -TILE_LEN / 2 + 6 + s * (TILE_LEN / slotCount);
+
+    // Tunnel suppression: skip ground obstacles in the tunnel mouth.
+    if (setPieceZSpan && slotZ > setPieceZSpan[0] && slotZ < setPieceZSpan[1]) continue;
 
     const lanesAvailable = [0, 1, 2].filter(li => {
       if (trainLane === li && slotZ > trainStart && slotZ < trainEnd) return false;
@@ -1891,7 +2052,14 @@ function handleCollisions(dt) {
       const obj = d.children[i];
       // Skip pure-decor objects (no collider, no pickup)
       if (obj.userData.kind === 'decor') {
-        obj.rotation.z += dt * 1.2;
+        if (obj.userData.spin) obj.rotation.z += dt * 1.2;
+        if (obj.userData.wave && obj.userData.wave.length) {
+          // station NPCs: wave hands
+          const t = performance.now() * 0.003;
+          for (const npc of obj.userData.wave) {
+            npc.rotation.z = Math.sin(t + npc.userData.phase) * 0.6;
+          }
+        }
         continue;
       }
       // World position of obj
