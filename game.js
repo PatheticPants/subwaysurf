@@ -1299,8 +1299,9 @@ function populateTile(tile, zStart) {
   const d = tile.userData.dynamic;
   tileSeed++;
 
-  // Skip the very first tile near spawn so player can ease in.
-  const isFirst = zStart < 30;
+  // Skip the first ~70m near spawn so the player has a moment to read
+  // the controls before anything spawns in their lane.
+  const isFirst = zStart < 70;
   if (isFirst) return;
 
   // Density: read from gameState (the wave system updates this).
@@ -1653,8 +1654,8 @@ touchArea.addEventListener('touchend', (e) => {
 window.addEventListener('keydown', (e) => {
   if (e.repeat) return;
   switch (e.key) {
-    case 'ArrowLeft': case 'a': case 'A': changeLane(1); break;
-    case 'ArrowRight': case 'd': case 'D': changeLane(-1); break;
+    case 'ArrowLeft': case 'a': case 'A': changeLane(-1); break;
+    case 'ArrowRight': case 'd': case 'D': changeLane(1); break;
     case 'ArrowUp': case 'w': case 'W': case ' ': jump(); break;
     case 'ArrowDown': case 's': case 'S': roll(); break;
     case 'p': case 'P': case 'Escape': togglePause(); break;
@@ -2037,8 +2038,10 @@ function handleCollisions(dt) {
   const pz = player.position.z;
 
   // Magnet radius
-  const magnetActive = gameState.powerups.magnet > 0;
-  const magnetR = magnetActive ? 6 : 0;
+  // Jetpack auto-grants magnet pull so coin trails on the ground are
+  // still reachable while flying overhead.
+  const magnetActive = gameState.powerups.magnet > 0 || gameState.powerups.jet > 0;
+  const magnetR = gameState.powerups.jet > 0 ? 9 : (magnetActive ? 6 : 0);
 
   // Power active flags
   const hover = gameState.powerups.hover > 0;
@@ -2307,6 +2310,9 @@ function showGameOver() {
   HUD.finalScore.textContent = Math.floor(gameState.score);
   HUD.finalCoins.textContent = gameState.coins;
   HUD.finalBest.textContent = gameState.best;
+  // Hide the BUSTED stamp before the panel opens — it's served its
+  // 1.5s purpose and otherwise sits behind the panel doing nothing.
+  document.getElementById('busted-stamp').classList.remove('show');
   HUD.gameover.classList.remove('hidden');
 }
 
