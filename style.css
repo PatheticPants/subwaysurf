@@ -663,6 +663,26 @@ body {
 }
 .result-row.best .r-val { color: var(--yellow); }
 
+.new-best {
+  display: none;
+  margin-top: 10px;
+  padding: 8px 18px;
+  background: linear-gradient(90deg, var(--yellow), var(--pink));
+  color: #2a0030;
+  font-weight: 900;
+  font-size: 14px;
+  letter-spacing: 4px;
+  border-radius: 12px;
+  text-align: center;
+  box-shadow: 0 4px 14px rgba(255, 138, 0, 0.4);
+  animation: newBestPulse 1.2s ease infinite;
+}
+.new-best.show { display: inline-block; }
+@keyframes newBestPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
 /* Floating score popups */
 #popup-layer {
   position: absolute; inset: 0;

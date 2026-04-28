@@ -79,32 +79,35 @@ const audio = (() => {
   };
 
   // Simple looping music: 16-step bass + arp pattern in C minor pentatonic
-  const NOTES = { C2: 65.41, Eb2: 77.78, F2: 87.31, G2: 98.0, Bb2: 116.54, C3: 130.81, Eb3: 155.56, F3: 174.61, G3: 196.0, Bb3: 233.08, C4: 261.63, Eb4: 311.13, G4: 392.0 };
+  const NOTES = { C2: 65.41, Eb2: 77.78, F2: 87.31, G2: 98.0, Bb2: 116.54, C3: 130.81, Eb3: 155.56, F3: 174.61, G3: 196.0, Bb3: 233.08, C4: 261.63, Eb4: 311.13, G4: 392.0, Bb4: 466.16, C5: 523.25 };
   const bassPattern = ['C2','C2','G2','C2', 'Bb2','C2','G2','F2', 'Eb2','C2','G2','F2', 'Bb2','C2','G2','C2'];
   const arpPattern  = ['C4','Eb4','G4','Eb4', 'F3','Bb3','C4','Bb3', 'Eb3','G3','Bb3','G3', 'F3','Bb3','C4','Eb4'];
-  const STEP_DUR = 0.18;
+  // Higher-octave lead that kicks in at higher intensities for energy.
+  const leadPattern = ['G4','Bb4','C5','Bb4', 'C5','Bb4','G4','Eb4', 'G4','Bb4','C5','Eb4', 'F3','G4','Bb4','C5'];
+  let intensity = 0; // 0..1, controls layering + tempo
 
-  function scheduleStep(step, when) {
+  function scheduleStep(step, when, stepDur) {
     if (!ctx || muted) return;
     const bassF = NOTES[bassPattern[step % 16]];
     const arpF  = NOTES[arpPattern[step % 16]];
+    const leadF = NOTES[leadPattern[step % 16]];
     // bass
     const o1 = ctx.createOscillator(); const g1 = ctx.createGain();
     o1.type = 'triangle'; o1.frequency.value = bassF;
     g1.gain.setValueAtTime(0, when);
     g1.gain.linearRampToValueAtTime(0.55, when + 0.01);
-    g1.gain.exponentialRampToValueAtTime(0.001, when + STEP_DUR * 0.95);
+    g1.gain.exponentialRampToValueAtTime(0.001, when + stepDur * 0.95);
     o1.connect(g1); g1.connect(musicGain);
-    o1.start(when); o1.stop(when + STEP_DUR);
+    o1.start(when); o1.stop(when + stepDur);
     // arp (only every other step for groove)
     if (step % 2 === 0) {
       const o2 = ctx.createOscillator(); const g2 = ctx.createGain();
       o2.type = 'square'; o2.frequency.value = arpF;
       g2.gain.setValueAtTime(0, when);
       g2.gain.linearRampToValueAtTime(0.18, when + 0.005);
-      g2.gain.exponentialRampToValueAtTime(0.001, when + STEP_DUR * 0.6);
+      g2.gain.exponentialRampToValueAtTime(0.001, when + stepDur * 0.6);
       o2.connect(g2); g2.connect(musicGain);
-      o2.start(when); o2.stop(when + STEP_DUR);
+      o2.start(when); o2.stop(when + stepDur);
     }
     // hi-hat-like noise on offbeats
     if (step % 2 === 1) {
@@ -113,12 +116,37 @@ const audio = (() => {
       for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / ch.length);
       const src = ctx.createBufferSource(); src.buffer = buf;
       const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 4000;
-      const g = ctx.createGain(); g.gain.value = 0.12;
+      const g = ctx.createGain(); g.gain.value = 0.12 + intensity * 0.06;
       src.connect(hp); hp.connect(g); g.connect(musicGain);
       src.start(when);
     }
-    musicNodes.push({ stop: when + STEP_DUR + 0.1 });
+    // Kick on every beat once intensity > 0.3
+    if (intensity > 0.3 && step % 4 === 0) {
+      const k = ctx.createOscillator(); const kg = ctx.createGain();
+      k.type = 'sine'; k.frequency.setValueAtTime(140, when);
+      k.frequency.exponentialRampToValueAtTime(45, when + 0.12);
+      kg.gain.setValueAtTime(0, when);
+      kg.gain.linearRampToValueAtTime(0.55 * intensity, when + 0.005);
+      kg.gain.exponentialRampToValueAtTime(0.001, when + 0.18);
+      k.connect(kg); kg.connect(musicGain);
+      k.start(when); k.stop(when + 0.2);
+    }
+    // Lead synth at high intensity
+    if (intensity > 0.55 && step % 2 === 0) {
+      const o3 = ctx.createOscillator(); const g3 = ctx.createGain();
+      o3.type = 'sawtooth'; o3.frequency.value = leadF;
+      g3.gain.setValueAtTime(0, when);
+      g3.gain.linearRampToValueAtTime(0.10 * (intensity - 0.4), when + 0.01);
+      g3.gain.exponentialRampToValueAtTime(0.001, when + stepDur * 0.7);
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
+      lp.frequency.value = 1500 + intensity * 2500;
+      o3.connect(lp); lp.connect(g3); g3.connect(musicGain);
+      o3.start(when); o3.stop(when + stepDur);
+    }
+    musicNodes.push({ stop: when + stepDur + 0.1 });
   }
+
+  function setIntensity(v) { intensity = Math.max(0, Math.min(1, v)); }
 
   let musicRunning = false;
   function startMusic() {
@@ -133,9 +161,12 @@ const audio = (() => {
   function pump() {
     if (!musicRunning || !ctx) return;
     const now = ctx.currentTime;
+    // Tempo speeds up with intensity: from 0.18s/step (~167 bpm at 16
+    // steps per beat) down to about 0.13s/step.
+    const stepDur = 0.18 - intensity * 0.05;
     while (musicTimer < now + 0.4) {
-      scheduleStep(musicStep, musicTimer);
-      musicTimer += STEP_DUR;
+      scheduleStep(musicStep, musicTimer, stepDur);
+      musicTimer += stepDur;
       musicStep++;
     }
     setTimeout(pump, 100);
@@ -151,7 +182,7 @@ const audio = (() => {
   return {
     init, resume,
     play: (name) => sfx[name] && sfx[name](),
-    startMusic, stopMusic,
+    startMusic, stopMusic, setIntensity,
     setMuted: v => { muted = v; if (v) stopMusic(); },
     isMuted: () => muted,
   };
@@ -1915,6 +1946,11 @@ const HUD = {
   comboCount: document.getElementById('combo-count'),
   comboMult: document.getElementById('combo-mult'),
   comboBar: document.getElementById('combo-bar'),
+  finalDistance: document.getElementById('final-distance'),
+  finalCombo: document.getElementById('final-combo'),
+  finalGems: document.getElementById('final-gems'),
+  finalWave: document.getElementById('final-wave'),
+  newBestFlag: document.getElementById('new-best-flag'),
 };
 
 HUD.best.textContent = gameState.best;
@@ -2586,13 +2622,22 @@ function updateDeathSequence(dt) {
 
 function showGameOver() {
   gameState.running = false;
-  if (gameState.score > gameState.best) {
-    gameState.best = Math.floor(gameState.score);
-    localStorage.setItem('subway-best', gameState.best);
+  audio.setIntensity(0);
+  const finalScore = Math.floor(gameState.score);
+  const isNewBest = finalScore > gameState.best;
+  if (isNewBest) {
+    gameState.best = finalScore;
+    localStorage.setItem('subway-best', String(gameState.best));
   }
-  HUD.finalScore.textContent = Math.floor(gameState.score);
+  HUD.finalScore.textContent = finalScore.toLocaleString();
   HUD.finalCoins.textContent = gameState.coins;
-  HUD.finalBest.textContent = gameState.best;
+  HUD.finalBest.textContent = gameState.best.toLocaleString();
+  if (HUD.finalDistance) HUD.finalDistance.textContent = `${Math.floor(playerState.distance)} m`;
+  if (HUD.finalCombo) HUD.finalCombo.textContent = `x${gameState.comboBest}`;
+  if (HUD.finalGems) HUD.finalGems.textContent = gameState.gems;
+  if (HUD.finalWave) HUD.finalWave.textContent = String(gameState.wave);
+  if (HUD.newBestFlag) HUD.newBestFlag.classList.toggle('show', isNewBest);
+
   // Hide the BUSTED stamp before the panel opens — it's served its
   // 1.5s purpose and otherwise sits behind the panel doing nothing.
   document.getElementById('busted-stamp').classList.remove('show');
@@ -2665,6 +2710,12 @@ function updateGame(dt, t) {
 
   // Combo timer
   tickCombo(dt);
+
+  // Music intensity scales with wave (1..6+) and current speed.
+  // Goal: chill at the start, full sawtooth-lead madness late game.
+  const speedNorm = (playerState.speed - BASE_SPEED) / (MAX_SPEED - BASE_SPEED);
+  const intensity = Math.max(0, Math.min(1, (gameState.wave - 1) * 0.18 + speedNorm * 0.4));
+  audio.setIntensity(intensity);
 
   // Lateral smoothing + lean into the dodge
   player.position.x += (playerState.targetX - player.position.x) * Math.min(1, 14 * dt);
