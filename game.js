@@ -1577,7 +1577,17 @@ function spawnTrail() {
   p.userData = { life: 0.5 };
   trailGroup.add(p);
 }
+function spawnTwinkle(x, y, z, color = 0xfff2a8) {
+  const p = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.28, 0.28),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, side: THREE.DoubleSide }),
+  );
+  p.position.set(x, y, z);
+  p.userData = { life: 0.24, twinkle: true };
+  trailGroup.add(p);
+}
 function updateTrail(dt) {
+  const t = performance.now() * 0.001;
   for (let i = trailGroup.children.length - 1; i >= 0; i--) {
     const p = trailGroup.children[i];
     p.userData.life -= dt;
@@ -1585,8 +1595,17 @@ function updateTrail(dt) {
       trailGroup.remove(p);
       p.geometry.dispose(); p.material.dispose();
     } else {
-      p.material.opacity = p.userData.life * 1.4;
-      p.scale.setScalar(1 + (0.5 - p.userData.life) * 1.5);
+      if (p.userData.twinkle) {
+        p.material.opacity = Math.max(0, p.userData.life * 3.6);
+        p.rotation.z += dt * 7;
+        p.scale.setScalar(0.75 + (0.24 - p.userData.life) * 2.7);
+        p.lookAt(camera.position);
+        p.position.y += dt * 1.2;
+      } else {
+        p.material.opacity = p.userData.life * 1.4;
+        p.scale.setScalar(1 + (0.5 - p.userData.life) * 1.5);
+      }
+      p.material.opacity *= 0.88 + Math.sin(t * 36 + i) * 0.12;
     }
   }
 }
@@ -2109,13 +2128,24 @@ function handleCollisions(dt) {
 
       // Spin coins
       if (obj.userData.kind === 'coin') {
-        obj.rotation.y += dt * 6;
+        obj.rotation.y += dt * 7;
+        const pulse = 1 + Math.sin(performance.now() * 0.01 + tmpVec.z * 0.22) * 0.12;
+        obj.scale.setScalar(pulse);
+        if (Math.random() < dt * 2.6) {
+          spawnTwinkle(tmpVec.x + (Math.random() - 0.5) * 0.22, tmpVec.y + (Math.random() - 0.5) * 0.22, tmpVec.z);
+        }
       }
 
       // Bobble power-ups
       if (obj.userData.kind === 'powerup') {
         obj.rotation.y += dt * 1.5;
         obj.position.y = obj.userData.baseY + Math.sin(performance.now() * 0.003 + i) * 0.15;
+        const glow = obj.children.find(c => c.geometry?.type === 'RingGeometry');
+        if (glow) {
+          glow.rotation.z += dt * 1.1;
+          glow.scale.setScalar(0.92 + Math.sin(performance.now() * 0.008 + i * 1.2) * 0.16);
+          glow.material.opacity = 0.45 + Math.sin(performance.now() * 0.01 + i) * 0.18;
+        }
       }
 
       // Update moving train
