@@ -1035,6 +1035,51 @@ function makeCoin() {
   return m;
 }
 
+// ===== Gem (rare collectible — worth 100 score, counts as 5 coins) =====
+const gemGeometry = new THREE.OctahedronGeometry(0.42, 0);
+function makeGem() {
+  const colors = [
+    { c: 0x4dffff, e: 0x00bfff }, // cyan
+    { c: 0xff5edc, e: 0xff00aa }, // magenta
+    { c: 0x9bff5e, e: 0x44dd00 }, // lime
+    { c: 0xff4d4d, e: 0xc40000 }, // ruby
+  ];
+  const pick = colors[Math.floor(Math.random() * colors.length)];
+  const m = new THREE.Mesh(
+    gemGeometry,
+    new THREE.MeshStandardMaterial({
+      color: pick.c, emissive: pick.e, emissiveIntensity: 0.85,
+      metalness: 0.7, roughness: 0.15, flatShading: true,
+    }),
+  );
+  m.castShadow = false;
+  m.userData = { kind: 'gem', hw: 0.5, hh: 0.5, hd: 0.5, cy: 0, color: pick.c };
+  return m;
+}
+
+// ===== Mystery Box (grants a random power-up) =====
+function makeMysteryBox() {
+  const g = new THREE.Group();
+  const body = boxMesh(0.85, 0.85, 0.85, 0xfff2a8, { emissive: 0xffae00, emissiveI: 0.4 });
+  body.position.y = 0;
+  g.add(body);
+  // Question-mark stripes on every face (one per axis cap)
+  for (const face of [
+    { p: [0, 0, 0.43], s: [0.4, 0.4, 0.02] },
+    { p: [0, 0, -0.43], s: [0.4, 0.4, 0.02] },
+    { p: [0.43, 0, 0], s: [0.02, 0.4, 0.4] },
+    { p: [-0.43, 0, 0], s: [0.02, 0.4, 0.4] },
+    { p: [0, 0.43, 0], s: [0.4, 0.02, 0.4] },
+    { p: [0, -0.43, 0], s: [0.4, 0.02, 0.4] },
+  ]) {
+    const mark = boxMesh(face.s[0], face.s[1], face.s[2], 0x2350a8, { emissive: 0x2350a8, emissiveI: 0.7 });
+    mark.position.set(face.p[0], face.p[1], face.p[2]);
+    g.add(mark);
+  }
+  g.userData = { kind: 'mystery', hw: 0.5, hh: 0.5, hd: 0.5, baseY: 1.4, cy: 0 };
+  return g;
+}
+
 // ===== Power-ups =====
 function makePowerUp(kind) {
   const g = new THREE.Group();
@@ -1446,6 +1491,25 @@ function populateTile(tile, zStart) {
     pu.position.set(LANE_X[lane], pu.userData.baseY, -TILE_LEN / 2 + 10 + Math.random() * (TILE_LEN - 20));
     d.add(pu);
   }
+
+  // Mystery box — about 7% per tile.
+  if (Math.random() < 0.07) {
+    const safeLanes = [0, 1, 2].filter(li => li !== trainLane);
+    const lane = safeLanes[Math.floor(Math.random() * safeLanes.length)];
+    const mb = makeMysteryBox();
+    mb.position.set(LANE_X[lane], mb.userData.baseY, -TILE_LEN / 2 + 12 + Math.random() * (TILE_LEN - 24));
+    d.add(mb);
+  }
+
+  // Gem — rare. ~9% per tile, mid-air on a free lane.
+  if (Math.random() < 0.09) {
+    const safeLanes = [0, 1, 2].filter(li => li !== trainLane);
+    const lane = safeLanes[Math.floor(Math.random() * safeLanes.length)];
+    const gem = makeGem();
+    const y = Math.random() < 0.5 ? 1.4 : 2.6; // half low, half jump-required
+    gem.position.set(LANE_X[lane], y, -TILE_LEN / 2 + 12 + Math.random() * (TILE_LEN - 24));
+    d.add(gem);
+  }
 }
 
 // ===== Chasers (guard + dog) =====
@@ -1788,6 +1852,11 @@ const gameState = {
   missionsDone: parseInt(localStorage.getItem('subway-missions-done') || '0', 10),
   wave: 1,
   density: 0.6,          // obstacle density multiplier (ramps with waves)
+  combo: 0,              // current coin-pickup combo
+  comboTimer: 0,         // seconds remaining before combo resets
+  comboBest: 0,
+  gems: 0,               // gems collected this run
+  nextMilestone: 500,    // next distance milestone (m)
 };
 
 // Mission templates — three fresh ones get rolled each session, and
@@ -1842,6 +1911,10 @@ const HUD = {
   popups: document.getElementById('popup-layer'),
   speedBlur: document.getElementById('speed-blur'),
   coinCard: document.querySelector('.coin-card'),
+  combo: document.getElementById('combo'),
+  comboCount: document.getElementById('combo-count'),
+  comboMult: document.getElementById('combo-mult'),
+  comboBar: document.getElementById('combo-bar'),
 };
 
 HUD.best.textContent = gameState.best;
@@ -1905,6 +1978,12 @@ function startGame() {
   gameState.slowmo = 0;
   gameState.wave = 1;
   gameState.density = 0.6;
+  gameState.combo = 0;
+  gameState.comboTimer = 0;
+  gameState.comboBest = 0;
+  gameState.gems = 0;
+  gameState.nextMilestone = 500;
+  if (HUD.combo) HUD.combo.classList.remove('show');
   cameraShake.t = 0; cameraShake.amp = 0;
   rollMissions();
   announceWave(1);
@@ -2062,6 +2141,41 @@ function updateHUD() {
   HUD.coins.textContent = gameState.coins;
 }
 
+// ===== Combo system =====
+// Each coin/gem pickup extends a 1.6s window. Combo gives a score
+// multiplier that scales 1.0 -> 3.0 across 30 chain.
+function bumpCombo(amount = 1) {
+  gameState.combo += amount;
+  if (gameState.combo > gameState.comboBest) gameState.comboBest = gameState.combo;
+  gameState.comboTimer = 1.6;
+  // Update HUD pip
+  if (HUD.combo) {
+    HUD.combo.classList.add('show');
+    HUD.comboCount.textContent = `x${gameState.combo}`;
+    HUD.comboMult.textContent = `${comboMultiplier().toFixed(2)}x`;
+    HUD.combo.classList.remove('pulse');
+    void HUD.combo.offsetWidth;
+    HUD.combo.classList.add('pulse');
+  }
+}
+function comboMultiplier() {
+  // 1.0 base, +0.066 per chain, capped at 3x
+  return Math.min(3, 1 + gameState.combo * 0.066);
+}
+function tickCombo(dt) {
+  if (gameState.comboTimer > 0) {
+    gameState.comboTimer -= dt;
+    if (gameState.comboTimer <= 0) {
+      gameState.combo = 0;
+      gameState.comboTimer = 0;
+      if (HUD.combo) HUD.combo.classList.remove('show');
+    } else {
+      // shrink the timer bar
+      if (HUD.comboBar) HUD.comboBar.style.transform = `scaleX(${gameState.comboTimer / 1.6})`;
+    }
+  }
+}
+
 function showPopup(x, y, text, power = false) {
   const el = document.createElement('div');
   el.className = 'popup' + (power ? ' power' : '');
@@ -2195,10 +2309,11 @@ function handleCollisions(dt) {
 
       // Skip far objects fast (use obj depth for long trains)
       const earlyZ = (obj.userData.hd ?? 1) + 4;
-      if (Math.abs(dz) > earlyZ && obj.userData.kind !== 'coin' && obj.userData.kind !== 'powerup') continue;
+      const kk = obj.userData.kind;
+      if (Math.abs(dz) > earlyZ && kk !== 'coin' && kk !== 'powerup' && kk !== 'gem' && kk !== 'mystery') continue;
 
-      // Magnet pulls coins toward player (works in tile-local coords)
-      if (obj.userData.kind === 'coin' && magnetActive) {
+      // Magnet pulls coins (and gems) toward player (tile-local coords)
+      if ((kk === 'coin' || kk === 'gem') && magnetActive) {
         const dist = Math.hypot(dx, tmpVec.y - py, dz);
         if (dist < magnetR) {
           const local = d.worldToLocal(new THREE.Vector3(px, py, pz));
@@ -2229,6 +2344,14 @@ function handleCollisions(dt) {
           glow.scale.setScalar(0.92 + Math.sin(performance.now() * 0.008 + i * 1.2) * 0.16);
           glow.material.opacity = 0.45 + Math.sin(performance.now() * 0.01 + i) * 0.18;
         }
+      }
+      if (obj.userData.kind === 'gem') {
+        obj.rotation.y += dt * 3;
+        obj.rotation.x += dt * 1.5;
+      }
+      if (obj.userData.kind === 'mystery') {
+        obj.rotation.y += dt * 2.2;
+        obj.position.y = obj.userData.baseY + Math.sin(performance.now() * 0.004 + i) * 0.2;
       }
 
       // Update moving train
@@ -2289,7 +2412,9 @@ function handleCollisions(dt) {
 
       if (ud.kind === 'coin') {
         gameState.coins++;
-        gameState.score += 25 * gameState.multiplier;
+        bumpCombo();
+        const value = 25 * gameState.multiplier * comboMultiplier();
+        gameState.score += value;
         advanceMission('coin');
         spawnSparkle(owpos, 0xffd23f);
         d.remove(obj);
@@ -2297,6 +2422,28 @@ function handleCollisions(dt) {
         void HUD.coinCard.offsetWidth;
         HUD.coinCard.classList.add('coin-flash');
         audio.play('coin');
+        continue;
+      }
+      if (ud.kind === 'gem') {
+        gameState.gems++;
+        gameState.coins += 5;
+        bumpCombo(5);
+        const value = 500 * gameState.multiplier * comboMultiplier();
+        gameState.score += value;
+        spawnSparkle(owpos, ud.color || 0xff5edc);
+        spawnSparkle(owpos.clone().add(new THREE.Vector3(0, 0.5, 0)), 0xffffff);
+        showPopup(window.innerWidth / 2, window.innerHeight / 2 - 120, `+${Math.floor(value)} GEM`, true);
+        d.remove(obj);
+        audio.play('powerup');
+        continue;
+      }
+      if (ud.kind === 'mystery') {
+        // Random power-up — surprise!
+        const kinds = ['magnet', 'multiplier', 'speed', 'hover', 'jet'];
+        const pk = kinds[Math.floor(Math.random() * kinds.length)];
+        activatePower(pk);
+        spawnSparkle(owpos, 0xffd23f);
+        d.remove(obj);
         continue;
       }
       if (ud.kind === 'powerup') {
@@ -2505,6 +2652,19 @@ function updateGame(dt, t) {
   playerState.distance += playerState.speed * dt;
   gameState.score += playerState.speed * dt * 0.5 * gameState.multiplier;
   advanceMission('distance', playerState.speed * dt);
+
+  // Distance milestones — every 500m awards a bonus + popup.
+  if (playerState.distance >= gameState.nextMilestone) {
+    const m = gameState.nextMilestone;
+    gameState.score += 1000;
+    showPopup(window.innerWidth / 2, window.innerHeight * 0.3, `${m}m  +1000`, true);
+    audio.play('mission');
+    spawnSparkle(player.position.clone().add(new THREE.Vector3(0, 2, 0)), 0xffd23f);
+    gameState.nextMilestone += 500;
+  }
+
+  // Combo timer
+  tickCombo(dt);
 
   // Lateral smoothing + lean into the dodge
   player.position.x += (playerState.targetX - player.position.x) * Math.min(1, 14 * dt);
