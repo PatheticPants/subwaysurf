@@ -845,6 +845,133 @@ function makeMovingTrain(length = 18) {
   return t;
 }
 
+function makeBarrel() {
+  // Rolling oil barrel — kind 'jump' (jump over). Animates by spinning.
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55, 0.55, 1.2, 14),
+    mat(0xd83a3a, { rough: 0.6 }),
+  );
+  body.rotation.z = Math.PI / 2; // lie on side, axis along x
+  body.position.y = 0.55;
+  body.castShadow = true; body.receiveShadow = true;
+  g.add(body);
+  // Hoop bands
+  for (const dx of [-0.45, 0, 0.45]) {
+    const band = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.57, 0.57, 0.06, 14),
+      mat(0x222233),
+    );
+    band.rotation.z = Math.PI / 2;
+    band.position.set(dx, 0.55, 0);
+    g.add(band);
+  }
+  // Hazard label
+  const label = boxMesh(0.5, 0.4, 0.04, 0xffd23f);
+  label.position.set(0, 0.55, 0.55);
+  g.add(label);
+  g.userData = { kind: 'jump', hw: 0.6, hh: 0.55, hd: 0.55, baseY: 0, cy: 0.55, rolling: true };
+  return g;
+}
+
+function makeCrate() {
+  // Wooden crate — kind 'jump'. Slightly smaller than a barrier.
+  const g = new THREE.Group();
+  const body = boxMesh(1.2, 1.1, 1.1, 0xb87333, { rough: 0.9 });
+  body.position.y = 0.55;
+  g.add(body);
+  // Plank seams
+  for (const y of [0.2, 0.55, 0.9]) {
+    const seam = boxMesh(1.22, 0.05, 1.12, 0x6e3d00);
+    seam.position.y = y;
+    g.add(seam);
+  }
+  // Stamp
+  const stamp = boxMesh(0.5, 0.3, 0.04, 0x222233);
+  stamp.position.set(0, 0.55, 0.56);
+  g.add(stamp);
+  g.userData = { kind: 'jump', hw: 0.6, hh: 0.55, hd: 0.55, baseY: 0, cy: 0.55, falling: true };
+  return g;
+}
+
+function makeFence() {
+  // Electric fence — kind 'jump' (jump over), tall posts and crackling
+  // bolts that pulse.
+  const g = new THREE.Group();
+  const postL = boxMesh(0.18, 1.4, 0.18, 0x222233);
+  postL.position.set(-1.0, 0.7, 0); g.add(postL);
+  const postR = postL.clone(); postR.position.x = 1.0; g.add(postR);
+  const insulatorL = boxMesh(0.22, 0.18, 0.22, 0xffffff);
+  insulatorL.position.set(-1.0, 1.5, 0); g.add(insulatorL);
+  const insulatorR = insulatorL.clone(); insulatorR.position.x = 1.0; g.add(insulatorR);
+  // Three horizontal cables glowing yellow
+  const cables = [];
+  for (let i = 0; i < 3; i++) {
+    const cable = boxMesh(2.0, 0.04, 0.04, 0xffd23f, { emissive: 0xffd23f, emissiveI: 0.9, cast: false });
+    cable.position.y = 0.4 + i * 0.4;
+    g.add(cable);
+    cables.push(cable);
+  }
+  // Bolt sprite (an emissive bar that pulses position randomly)
+  const bolt = boxMesh(2.0, 0.06, 0.06, 0x88ccff, { emissive: 0x88ccff, emissiveI: 1.5, cast: false });
+  bolt.position.y = 0.8;
+  g.add(bolt);
+  g.userData = { kind: 'jump', hw: 1.0, hh: 0.6, hd: 0.2, baseY: 0, cy: 0.6, fence: true, bolt };
+  return g;
+}
+
+function makeOpenTrain(length = 16) {
+  // Train car with a passable opening in the middle so the player can
+  // run through it. Implemented as two halves with a gap.
+  const g = new THREE.Group();
+  const colors = [COLORS.trainRed, COLORS.trainYellow, COLORS.trainBlue, COLORS.trainGreen];
+  const color = colors[Math.floor(Math.random() * colors.length)];
+  const halfLen = (length - 4) / 2; // 4m gap
+  for (const sign of [-1, 1]) {
+    const z = sign * (halfLen / 2 + 2);
+    const body = boxMesh(2.0, 2.3, halfLen, color, { rough: 0.5 });
+    body.position.set(0, 1.4, z); g.add(body);
+    const roof = boxMesh(2.1, 0.18, halfLen, 0x222233);
+    roof.position.set(0, 2.55, z); g.add(roof);
+    const stripe = boxMesh(2.05, 0.25, halfLen, 0xffffff);
+    stripe.position.set(0, 1.8, z); g.add(stripe);
+    // End cap (nearer the gap)
+    const cap = boxMesh(2.1, 2.3, 0.18, 0x222233);
+    cap.position.set(0, 1.4, z - sign * (halfLen / 2 + 0.05)); g.add(cap);
+    // Windows
+    const winCount = Math.max(1, Math.floor(halfLen / 2.5));
+    for (let i = 0; i < winCount; i++) {
+      const w = boxMesh(0.12, 0.55, 1.2, 0x9be6ff, { emissive: 0x88c0ff, emissiveI: 0.5 });
+      w.position.set(1.06, 2.0, z - halfLen / 2 + 1.0 + i * (halfLen / winCount));
+      g.add(w);
+      const w2 = w.clone(); w2.position.x = -1.06; g.add(w2);
+    }
+    // Wheels
+    for (let i = 0; i < 2; i++) {
+      const wh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.3, 0.3, 0.3, 12),
+        mat(0x111122),
+      );
+      wh.rotation.z = Math.PI / 2;
+      wh.position.set(0, 0.3, z - halfLen / 3 + i * (halfLen / 1.5));
+      g.add(wh);
+    }
+  }
+  // Two collider segments — we tag the group as 'openTrain' and store
+  // both extents so the collision pass handles them separately.
+  g.userData = {
+    kind: 'openTrain',
+    hw: 1.05, hh: 1.3, hd: 0,
+    baseY: 0, cy: 1.4,
+    segments: [
+      { z: -(halfLen / 2 + 2), hd: halfLen / 2 + 0.1 },
+      { z:  (halfLen / 2 + 2), hd: halfLen / 2 + 0.1 },
+    ],
+    length,
+  };
+  return g;
+}
+
 function makeRamp() {
   const g = new THREE.Group();
   // simple wedge using BoxGeometry rotated
@@ -952,6 +1079,81 @@ function makePowerUp(kind) {
 // We populate tiles when they enter ahead range with a deterministic-ish mix.
 let tileSeed = 0;
 
+// Adds a coin to a tile's dynamic group, snapping any falling-crate
+// dropY initialiser as needed.
+function addCoin(d, x, y, z) {
+  const c = makeCoin();
+  c.position.set(x, y, z);
+  d.add(c);
+}
+
+// Coin shapes
+function placeCoinLine(d, lane, slotZ, count, yBase = 1.4) {
+  for (let i = 0; i < count; i++) {
+    const z = slotZ + i * 1.2 - count * 0.6;
+    addCoin(d, LANE_X[lane], yBase, z);
+  }
+}
+function placeCoinArch(d, lane, slotZ, count = 7, peak = 2.0) {
+  // Coin arch over a barrier — arc up, then back down.
+  for (let i = 0; i < count; i++) {
+    const t = i / (count - 1);
+    const y = 1.2 + Math.sin(t * Math.PI) * peak;
+    const z = slotZ + (i - (count - 1) / 2) * 0.9;
+    addCoin(d, LANE_X[lane], y, z);
+  }
+}
+function placeCoinZigzag(d, slotZ, lanes, length = 9) {
+  // Zigzag between provided lanes (must be at least 2). Coin every step,
+  // alternating lane every 2 coins.
+  const lanePicks = lanes.length >= 2 ? lanes : [0, 1];
+  for (let i = 0; i < length; i++) {
+    const lane = lanePicks[Math.floor(i / 2) % lanePicks.length];
+    const z = slotZ + i * 1.0 - length * 0.5;
+    addCoin(d, LANE_X[lane], 1.4, z);
+  }
+}
+function placeCoinRing(d, lane, centerZ, vertical = false) {
+  // 10-coin bonus ring. By default a coin ring oriented vertically
+  // (you run through it). Set vertical=false for a flat ring on the
+  // ground — but vertical reads better in motion.
+  const count = 10;
+  const radius = 0.9;
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2;
+    const x = LANE_X[lane] + Math.cos(a) * radius;
+    const y = 1.4 + Math.sin(a) * radius;
+    const z = centerZ + (vertical ? 0 : Math.sin(a) * radius);
+    addCoin(d, x, y, z);
+  }
+  // Glowing torus indicator
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(1.0, 0.06, 8, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.7 }),
+  );
+  ring.position.set(LANE_X[lane], 1.4, centerZ);
+  if (!vertical) ring.rotation.x = Math.PI / 2;
+  ring.userData = { kind: 'decor' };
+  d.add(ring);
+}
+
+function pickGroundObstacle() {
+  // Weighted pick. Excludes trains (those are placed separately).
+  const r = Math.random();
+  if (r < 0.18) return makeBarrier();
+  if (r < 0.36) return makeSign();
+  if (r < 0.54) return makeCone();
+  if (r < 0.66) return makeBarrel();
+  if (r < 0.78) {
+    const c = makeCrate();
+    c.userData.dropY = 6 + Math.random() * 2; // start above, drop in
+    c.position.y = c.userData.dropY;
+    return c;
+  }
+  if (r < 0.88) return makeFence();
+  return makeRamp();
+}
+
 function populateTile(tile, zStart) {
   if (tile.userData.populated) return;
   tile.userData.populated = true;
@@ -962,13 +1164,27 @@ function populateTile(tile, zStart) {
   const isFirst = zStart < 30;
   if (isFirst) return;
 
-  // Decide whether to place a long train across one lane (about 35% chance)
-  const trainLane = Math.random() < 0.35 ? Math.floor(Math.random() * 3) : -1;
+  // Density — currently uniform; the wave system in commit 3 will
+  // modulate this. Read from gameState if it's been set up.
+  const density = (gameState && gameState.density) || 1.0;
+
+  // Trains: 35% chance of a long train, 12% chance of an open-train.
+  let trainLane = -1;
   let trainStart = 0, trainEnd = 0;
-  if (trainLane >= 0) {
+  const trainRoll = Math.random();
+  if (trainRoll < 0.35 * density) {
+    trainLane = Math.floor(Math.random() * 3);
     const len = 18 + Math.random() * 8;
     const train = (Math.random() < 0.3) ? makeMovingTrain(len) : makeTrain(len);
-    train.position.set(LANE_X[trainLane], train.userData.baseY, -TILE_LEN / 2 + 6 + Math.random() * (TILE_LEN - len - 8));
+    train.position.set(LANE_X[trainLane], 0, -TILE_LEN / 2 + 6 + Math.random() * (TILE_LEN - len - 8));
+    trainStart = train.position.z - len / 2 - 1;
+    trainEnd = train.position.z + len / 2 + 1;
+    d.add(train);
+  } else if (trainRoll < 0.47 * density) {
+    trainLane = Math.floor(Math.random() * 3);
+    const len = 16;
+    const train = makeOpenTrain(len);
+    train.position.set(LANE_X[trainLane], 0, -TILE_LEN / 2 + 8 + Math.random() * (TILE_LEN - len - 10));
     trainStart = train.position.z - len / 2 - 1;
     trainEnd = train.position.z + len / 2 + 1;
     d.add(train);
@@ -985,48 +1201,52 @@ function populateTile(tile, zStart) {
     });
     if (!lanesAvailable.length) continue;
 
-    // Possibly place 1-2 obstacles in this slot
-    const placeCount = Math.random() < 0.55 ? 1 : (Math.random() < 0.4 ? 2 : 0);
+    // Place 0-2 obstacles in this slot
+    const placeCount = Math.random() < 0.55 * density ? 1
+                     : (Math.random() < 0.35 * density ? 2 : 0);
     const usedLanes = new Set();
     for (let p = 0; p < placeCount; p++) {
       const lane = lanesAvailable[Math.floor(Math.random() * lanesAvailable.length)];
       if (usedLanes.has(lane)) continue;
       usedLanes.add(lane);
-
-      const r = Math.random();
-      let ob;
-      if (r < 0.3) ob = makeBarrier();
-      else if (r < 0.55) ob = makeSign();
-      else if (r < 0.8) ob = makeCone();
-      else ob = makeRamp();
-
+      const ob = pickGroundObstacle();
       ob.position.set(LANE_X[lane], ob.userData.baseY, slotZ);
+      // If it was a falling crate the factory set dropY which overrode y; restore.
+      if (ob.userData.falling) ob.position.y = ob.userData.dropY;
+      // Arch coins over a barrier-like obstacle ~30% of the time.
+      if (ob.userData.kind === 'jump' && Math.random() < 0.3) {
+        placeCoinArch(d, lane, slotZ, 7, 1.6);
+      }
       d.add(ob);
     }
 
-    // Coin trail in remaining lane(s)
+    // Coin shapes in the remaining lane(s)
     const coinLanes = lanesAvailable.filter(li => !usedLanes.has(li));
     if (coinLanes.length && Math.random() < 0.85) {
-      const lane = coinLanes[Math.floor(Math.random() * coinLanes.length)];
-      const trailLen = 5 + Math.floor(Math.random() * 4);
-      const yBase = Math.random() < 0.2 ? 2.5 : 1.4; // some arcs jump
-      for (let i = 0; i < trailLen; i++) {
-        const c = makeCoin();
-        const t = i / (trailLen - 1);
-        // arch coins occasionally
-        const y = yBase + (yBase < 2 ? Math.sin(t * Math.PI) * 0.4 : 0);
-        c.position.set(LANE_X[lane], y, slotZ + i * 1.2 - trailLen * 0.6);
-        d.add(c);
+      const r = Math.random();
+      if (r < 0.55 || coinLanes.length < 2) {
+        // Straight trail
+        const lane = coinLanes[Math.floor(Math.random() * coinLanes.length)];
+        const len = 5 + Math.floor(Math.random() * 4);
+        placeCoinLine(d, lane, slotZ, len, Math.random() < 0.18 ? 2.5 : 1.4);
+      } else if (r < 0.85) {
+        // Zigzag across two free lanes
+        placeCoinZigzag(d, slotZ, coinLanes, 9);
+      } else {
+        // Bonus ring
+        const lane = coinLanes[Math.floor(Math.random() * coinLanes.length)];
+        placeCoinRing(d, lane, slotZ);
       }
     }
   }
 
-  // Power-up — about 10% per tile
+  // Power-up — slight bump in chance. Avoid spawning on a train lane.
   if (Math.random() < 0.18) {
     const kinds = ['magnet', 'multiplier', 'speed', 'hover', 'jet'];
     const pk = kinds[Math.floor(Math.random() * kinds.length)];
     const pu = makePowerUp(pk);
-    const lane = Math.floor(Math.random() * 3);
+    const safeLanes = [0, 1, 2].filter(li => li !== trainLane);
+    const lane = safeLanes[Math.floor(Math.random() * safeLanes.length)];
     pu.position.set(LANE_X[lane], pu.userData.baseY, -TILE_LEN / 2 + 10 + Math.random() * (TILE_LEN - 20));
     d.add(pu);
   }
@@ -1571,6 +1791,11 @@ function handleCollisions(dt) {
     if (!d) continue;
     for (let i = d.children.length - 1; i >= 0; i--) {
       const obj = d.children[i];
+      // Skip pure-decor objects (no collider, no pickup)
+      if (obj.userData.kind === 'decor') {
+        obj.rotation.z += dt * 1.2;
+        continue;
+      }
       // World position of obj
       tmpVec.set(0, 0, 0);
       obj.getWorldPosition(tmpVec);
@@ -1609,20 +1834,55 @@ function handleCollisions(dt) {
         obj.position.z += obj.userData.speed * dt;
       }
 
+      // Per-frame obstacle anims
+      if (obj.userData.rolling) {
+        // Rolling barrel — spin the body around its long axis (x).
+        obj.children[0].rotation.x += dt * 6;
+      }
+      if (obj.userData.falling && obj.userData.dropY > 0) {
+        // Falling crate — settle from above.
+        obj.userData.dropY = Math.max(0, obj.userData.dropY - dt * 14);
+        obj.position.y = obj.userData.dropY;
+      }
+      if (obj.userData.fence) {
+        // Electric fence — flicker bolt position and brightness.
+        const b = obj.userData.bolt;
+        b.position.y = 0.4 + Math.random() * 1.0;
+        b.material.emissiveIntensity = 0.5 + Math.random() * 1.8;
+      }
+
       // Quick AABB check — within neighborhood
       const owpos = new THREE.Vector3();
       obj.getWorldPosition(owpos);
       const oz = owpos.z;
-      if (Math.abs(oz - pz) > (obj.userData.hd ?? 1) + 1.5) continue;
-
       const ud = obj.userData;
+      const earlyHd = ud.kind === 'openTrain'
+        ? Math.max(...ud.segments.map(s => s.hd))
+        : (ud.hd ?? 1);
+      if (Math.abs(oz - pz) > earlyHd + 1.5) continue;
+
       const cyWorld = owpos.y + (ud.cy ?? 0);
-      const hit = aabbOverlap(
-        owpos.x, cyWorld, oz,
-        ud.hw ?? 0.5, ud.hh ?? 0.5, ud.hd ?? 0.5,
-        px, py, pz,
-        ph.hw, ph.hh, ph.hd,
-      );
+
+      // Open-train obstacles: two halves with a passable gap between.
+      let hit;
+      if (ud.kind === 'openTrain') {
+        hit = false;
+        for (const seg of ud.segments) {
+          if (aabbOverlap(
+            owpos.x, cyWorld, oz + seg.z,
+            ud.hw, ud.hh, seg.hd,
+            px, py, pz,
+            ph.hw, ph.hh, ph.hd,
+          )) { hit = true; break; }
+        }
+      } else {
+        hit = aabbOverlap(
+          owpos.x, cyWorld, oz,
+          ud.hw ?? 0.5, ud.hh ?? 0.5, ud.hd ?? 0.5,
+          px, py, pz,
+          ph.hw, ph.hh, ph.hd,
+        );
+      }
       if (!hit) continue;
 
       if (ud.kind === 'coin') {
@@ -1654,13 +1914,13 @@ function handleCollisions(dt) {
       }
       // Solid obstacle
       if (invincible) {
-        // Smash power: destroy non-train obstacles
-        if (ud.kind !== 'train') {
+        // Smash power: destroy small obstacles, but trains stay solid.
+        if (ud.kind !== 'train' && ud.kind !== 'openTrain') {
           spawnSparkle(owpos, 0xff3da6);
           d.remove(obj);
           continue;
         } else {
-          // can't destroy train; trigger game over only if not jet
+          // can't destroy a train; jetpack flies over but hover doesn't
           if (!jet) { triggerDeath(obj); return; }
         }
       } else {
