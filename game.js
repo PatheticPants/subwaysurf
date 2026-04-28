@@ -1363,41 +1363,49 @@ function populateTile(tile, zStart) {
     });
     if (!lanesAvailable.length) continue;
 
-    // Place 0-2 obstacles in this slot
-    const placeCount = Math.random() < 0.55 * density ? 1
-                     : (Math.random() < 0.35 * density ? 2 : 0);
+    // Roll the coin pattern *first* so a bonus-ring slot can suppress
+    // its obstacles entirely (otherwise the player can be forced to
+    // dodge an obstacle in the same lane as the ring).
+    const patternRoll = Math.random();
+    const wantRing = lanesAvailable.length >= 1 && patternRoll > 0.92;
+
+    // Place 0-2 obstacles in this slot — but skip entirely if we're
+    // about to drop a bonus ring here.
     const usedLanes = new Set();
-    for (let p = 0; p < placeCount; p++) {
-      const lane = lanesAvailable[Math.floor(Math.random() * lanesAvailable.length)];
-      if (usedLanes.has(lane)) continue;
-      usedLanes.add(lane);
-      const ob = pickGroundObstacle();
-      ob.position.set(LANE_X[lane], ob.userData.baseY, slotZ);
-      // If it was a falling crate the factory set dropY which overrode y; restore.
-      if (ob.userData.falling) ob.position.y = ob.userData.dropY;
-      // Arch coins over a barrier-like obstacle ~30% of the time.
-      if (ob.userData.kind === 'jump' && Math.random() < 0.3) {
-        placeCoinArch(d, lane, slotZ, 7, 1.6);
+    if (!wantRing) {
+      const placeCount = Math.random() < 0.55 * density ? 1
+                       : (Math.random() < 0.35 * density ? 2 : 0);
+      for (let p = 0; p < placeCount; p++) {
+        const lane = lanesAvailable[Math.floor(Math.random() * lanesAvailable.length)];
+        if (usedLanes.has(lane)) continue;
+        usedLanes.add(lane);
+        const ob = pickGroundObstacle();
+        ob.position.set(LANE_X[lane], ob.userData.baseY, slotZ);
+        // If it was a falling crate the factory set dropY which overrode y; restore.
+        if (ob.userData.falling) ob.position.y = ob.userData.dropY;
+        // Arch coins over a barrier-like obstacle ~30% of the time.
+        if (ob.userData.kind === 'jump' && Math.random() < 0.3) {
+          placeCoinArch(d, lane, slotZ, 7, 1.6);
+        }
+        d.add(ob);
       }
-      d.add(ob);
     }
 
-    // Coin shapes in the remaining lane(s)
-    const coinLanes = lanesAvailable.filter(li => !usedLanes.has(li));
-    if (coinLanes.length && Math.random() < 0.85) {
-      const r = Math.random();
-      if (r < 0.55 || coinLanes.length < 2) {
-        // Straight trail
-        const lane = coinLanes[Math.floor(Math.random() * coinLanes.length)];
-        const len = 5 + Math.floor(Math.random() * 4);
-        placeCoinLine(d, lane, slotZ, len, Math.random() < 0.18 ? 2.5 : 1.4);
-      } else if (r < 0.85) {
-        // Zigzag across two free lanes
-        placeCoinZigzag(d, slotZ, coinLanes, 9);
-      } else {
-        // Bonus ring
-        const lane = coinLanes[Math.floor(Math.random() * coinLanes.length)];
-        placeCoinRing(d, lane, slotZ);
+    // Coin shapes
+    if (wantRing) {
+      const lane = lanesAvailable[Math.floor(Math.random() * lanesAvailable.length)];
+      placeCoinRing(d, lane, slotZ);
+    } else {
+      const coinLanes = lanesAvailable.filter(li => !usedLanes.has(li));
+      if (coinLanes.length && Math.random() < 0.85) {
+        const r = Math.random();
+        if (r < 0.6 || coinLanes.length < 2) {
+          const lane = coinLanes[Math.floor(Math.random() * coinLanes.length)];
+          const len = 5 + Math.floor(Math.random() * 4);
+          placeCoinLine(d, lane, slotZ, len, Math.random() < 0.18 ? 2.5 : 1.4);
+        } else {
+          placeCoinZigzag(d, slotZ, coinLanes, 9);
+        }
       }
     }
   }
@@ -1699,8 +1707,11 @@ const missionTemplates = [
   { kind: 'mission',  goal: 2,   label: 'Complete 2 missions' },
 ];
 
-function rollMission(excludeIds = new Set()) {
-  const pool = missionTemplates.filter((_, i) => !excludeIds.has(i));
+function rollMission(excludeIds = new Set(), excludeKinds = new Set()) {
+  // Filter by id (avoid duplicates) AND by kind (so we never get two
+  // distance / two coin missions side by side, which feels redundant).
+  let pool = missionTemplates.filter((t, i) => !excludeIds.has(i) && !excludeKinds.has(t.kind));
+  if (!pool.length) pool = missionTemplates.filter((_, i) => !excludeIds.has(i));
   if (!pool.length) return { ...missionTemplates[0], id: 0, progress: 0, done: false };
   const idx = Math.floor(Math.random() * pool.length);
   const tmpl = pool[idx];
@@ -1772,6 +1783,7 @@ function startGame() {
   // Hide hit feedback from any prior run
   document.getElementById('hit-flash').classList.remove('active');
   document.getElementById('busted-stamp').classList.remove('show');
+  document.getElementById('missions-stack').classList.remove('fade');
 
   // Audio needs a user gesture to start (we get one from the play tap)
   audio.init();
@@ -1835,12 +1847,14 @@ function startGame() {
 }
 
 function rollMissions() {
-  // Build three distinct missions
+  // Build three distinct missions, distinct by id AND by kind.
   gameState.missions = [];
-  const used = new Set();
+  const usedIds = new Set();
+  const usedKinds = new Set();
   for (let i = 0; i < 3; i++) {
-    const m = rollMission(used);
-    used.add(m.id);
+    const m = rollMission(usedIds, usedKinds);
+    usedIds.add(m.id);
+    usedKinds.add(m.kind);
     gameState.missions.push(m);
   }
   renderMissions();
@@ -1893,8 +1907,12 @@ function advanceMission(kind, amount = 1) {
 }
 
 function replaceMissionSlot(i) {
-  const used = new Set(gameState.missions.map(m => m.id));
-  const repl = rollMission(used);
+  const usedIds = new Set(gameState.missions.map(m => m.id));
+  // Exclude kinds of the *other two* live missions so we don't replace
+  // a finished coin mission with another coin mission while a coin
+  // mission is already live in another slot.
+  const usedKinds = new Set(gameState.missions.filter((_, j) => j !== i).map(m => m.kind));
+  const repl = rollMission(usedIds, usedKinds);
   gameState.missions[i] = repl;
   renderMissions();
 }
@@ -1917,10 +1935,12 @@ function updateWaves(dt) {
     announceWave(wantWave);
   }
   // Density curve: 0.6 -> 1.4 by wave 6, with a 0.6 dip in the first
-  // ~3s of every wave.
+  // ~3s of every wave. Also a hard floor of 0.6 for the first 5s of
+  // the run so brand-new players aren't pelted out of the gate.
   const intoWave = gameState.elapsed - (gameState.wave - 1) * waveInterval;
   const calm = intoWave < 3 ? 0.6 : 1.0;
   gameState.density = Math.min(1.4, (0.55 + gameState.wave * 0.13)) * calm;
+  if (gameState.elapsed < 5) gameState.density = Math.min(gameState.density, 0.6);
 }
 
 function resetWorld() {
@@ -2156,7 +2176,7 @@ function handleCollisions(dt) {
 
       if (ud.kind === 'coin') {
         gameState.coins++;
-        gameState.score += 10 * gameState.multiplier;
+        gameState.score += 25 * gameState.multiplier;
         advanceMission('coin');
         spawnSparkle(owpos, 0xffd23f);
         d.remove(obj);
@@ -2232,6 +2252,9 @@ function triggerDeath(obj) {
   player.userData.parts.board.visible = false;
   player.userData.parts.pack2.visible = false;
   player.userData.parts.flames.visible = false;
+
+  // Fade missions out so the BUSTED stamp doesn't collide with them.
+  HUD.missionsStack.classList.add('fade');
 
   audio.play('hit');
   audio.stopMusic();
@@ -2355,14 +2378,19 @@ function updateGame(dt, t) {
   gameState.elapsed += dt;
   updateWaves(dt);
 
-  // Speed ramp
-  const target = Math.min(MAX_SPEED, BASE_SPEED + gameState.elapsed * SPEED_RAMP);
+  // Speed ramp — ease in from 14 m/s up to BASE_SPEED over the first
+  // 3 s so the player has a beat to read what's on screen, then keep
+  // ramping toward MAX_SPEED with elapsed time.
+  const easeT = Math.min(1, gameState.elapsed / 3);
+  const easedBase = 14 + (BASE_SPEED - 14) * easeT;
+  const target = Math.min(MAX_SPEED, easedBase + gameState.elapsed * SPEED_RAMP);
   const speedMul = gameState.powerups.speed > 0 ? 1.5 : 1;
   playerState.speed += (target * speedMul - playerState.speed) * Math.min(1, dt * 1.5);
 
-  // Score from distance
+  // Score from distance — halved vs before so coin pickups feel like
+  // they meaningfully contribute to score instead of being noise.
   playerState.distance += playerState.speed * dt;
-  gameState.score += playerState.speed * dt * 1.0 * gameState.multiplier;
+  gameState.score += playerState.speed * dt * 0.5 * gameState.multiplier;
   advanceMission('distance', playerState.speed * dt);
 
   // Lateral smoothing + lean into the dodge

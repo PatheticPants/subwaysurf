@@ -180,6 +180,11 @@ body {
   width: min(56vw, 280px);
   display: flex; flex-direction: column; gap: 5px;
   z-index: 11;
+  transition: opacity 0.25s ease;
+}
+.missions-stack.fade {
+  opacity: 0;
+  pointer-events: none;
 }
 .mission-card {
   background: rgba(0,0,0,0.5);
