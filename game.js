@@ -1662,8 +1662,8 @@ touchArea.addEventListener('touchend', (e) => {
 window.addEventListener('keydown', (e) => {
   if (e.repeat) return;
   switch (e.key) {
-    case 'ArrowLeft': case 'a': case 'A': changeLane(-1); break;
-    case 'ArrowRight': case 'd': case 'D': changeLane(1); break;
+    case 'ArrowLeft': case 'a': case 'A': changeLane(1); break;
+    case 'ArrowRight': case 'd': case 'D': changeLane(-1); break;
     case 'ArrowUp': case 'w': case 'W': case ' ': jump(); break;
     case 'ArrowDown': case 's': case 'S': roll(); break;
     case 'p': case 'P': case 'Escape': togglePause(); break;
