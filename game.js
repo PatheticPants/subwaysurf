@@ -1435,6 +1435,7 @@ function changeLane(dir) {
   playerState.targetX = LANE_X[next];
   playerState.tilt = dir > 0 ? -0.35 : 0.35;
   audio.play('lane');
+  advanceMission('lane');
 }
 function jump() {
   if (!playerState.alive || gameState.paused || !gameState.running) return;
@@ -1458,6 +1459,7 @@ function roll() {
     playerState.rollTime = ROLL_TIME;
     setRollingPose(true);
     audio.play('roll');
+    advanceMission('roll');
   }
 }
 
@@ -1510,16 +1512,39 @@ const gameState = {
   startTime: 0,
   elapsed: 0,
   powerups: { magnet: 0, multiplier: 0, speed: 0, hover: 0, jet: 0 },
-  mission: { goal: 25, progress: 0, label: 'Collect 25 coins' },
+  missions: [],          // three live mission slots
+  missionsDone: parseInt(localStorage.getItem('subway-missions-done') || '0', 10),
+  wave: 1,
+  density: 0.6,          // obstacle density multiplier (ramps with waves)
 };
 
-const missions = [
-  { goal: 25, label: 'Collect 25 coins' },
-  { goal: 50, label: 'Collect 50 coins' },
-  { goal: 1, label: 'Activate any power-up', kind: 'powerup' },
-  { goal: 200, label: 'Run 200m', kind: 'distance' },
-  { goal: 5, label: 'Jump 5 times', kind: 'jump' },
+// Mission templates — three fresh ones get rolled each session, and
+// completed ones get replaced with a new draw on the fly so you always
+// have three live objectives.
+const missionTemplates = [
+  { kind: 'coin',     goal: 50,  label: 'Collect 50 coins' },
+  { kind: 'coin',     goal: 100, label: 'Collect 100 coins' },
+  { kind: 'coin',     goal: 250, label: 'Collect 250 coins in one run' },
+  { kind: 'distance', goal: 200, label: 'Run 200 m' },
+  { kind: 'distance', goal: 500, label: 'Run 500 m' },
+  { kind: 'distance', goal: 1000,label: 'Run 1 km' },
+  { kind: 'powerup',  goal: 1,   label: 'Activate any power-up' },
+  { kind: 'powerup',  goal: 3,   label: 'Activate 3 power-ups' },
+  { kind: 'jump',     goal: 8,   label: 'Jump over 8 obstacles' },
+  { kind: 'jump',     goal: 20,  label: 'Jump 20 times' },
+  { kind: 'lane',     goal: 25,  label: 'Change lanes 25 times' },
+  { kind: 'roll',     goal: 6,   label: 'Roll 6 times' },
+  { kind: 'mission',  goal: 2,   label: 'Complete 2 missions' },
 ];
+
+function rollMission(excludeIds = new Set()) {
+  const pool = missionTemplates.filter((_, i) => !excludeIds.has(i));
+  if (!pool.length) return { ...missionTemplates[0], id: 0, progress: 0, done: false };
+  const idx = Math.floor(Math.random() * pool.length);
+  const tmpl = pool[idx];
+  const realIdx = missionTemplates.indexOf(tmpl);
+  return { ...tmpl, id: realIdx, progress: 0, done: false };
+}
 
 // ===== HUD elements =====
 const HUD = {
@@ -1533,8 +1558,9 @@ const HUD = {
   finalScore: document.getElementById('final-score'),
   finalCoins: document.getElementById('final-coins'),
   finalBest: document.getElementById('final-best'),
-  missionText: document.getElementById('mission-text'),
-  missionFill: document.getElementById('mission-fill'),
+  missionsStack: document.getElementById('missions-stack'),
+  waveBanner: document.getElementById('wave-banner'),
+  waveBannerText: document.getElementById('wave-banner-text'),
   powerups: document.getElementById('powerups'),
   multiplier: document.getElementById('multiplier-badge'),
   multiplierText: document.getElementById('multiplier-text'),
@@ -1601,8 +1627,11 @@ function startGame() {
   gameState.startTime = performance.now();
   gameState.powerups = { magnet: 0, multiplier: 0, speed: 0, hover: 0, jet: 0 };
   gameState.slowmo = 0;
+  gameState.wave = 1;
+  gameState.density = 0.6;
   cameraShake.t = 0; cameraShake.amp = 0;
-  pickMission();
+  rollMissions();
+  announceWave(1);
   updateHUD();
   HUD.powerups.innerHTML = '';
 
@@ -1643,24 +1672,93 @@ function startGame() {
   dog.rotation.set(0, 0, 0);
 }
 
-function pickMission() {
-  const m = missions[Math.floor(Math.random() * missions.length)];
-  gameState.mission = { goal: m.goal, progress: 0, label: m.label, kind: m.kind || 'coin' };
-  HUD.missionText.textContent = m.label;
-  HUD.missionFill.style.width = '0%';
+function rollMissions() {
+  // Build three distinct missions
+  gameState.missions = [];
+  const used = new Set();
+  for (let i = 0; i < 3; i++) {
+    const m = rollMission(used);
+    used.add(m.id);
+    gameState.missions.push(m);
+  }
+  renderMissions();
+}
+
+function renderMissions() {
+  HUD.missionsStack.innerHTML = '';
+  for (const m of gameState.missions) {
+    const card = document.createElement('div');
+    card.className = 'mission-card' + (m.done ? ' done' : '');
+    const pct = Math.min(100, (m.progress / m.goal) * 100);
+    card.innerHTML = `
+      <div class="mc-check">${m.done ? '✓' : ''}</div>
+      <span class="mc-text">${m.label}</span>
+      <div class="mc-progress"><div class="mc-fill" style="width:${pct}%"></div></div>
+    `;
+    HUD.missionsStack.appendChild(card);
+    m._el = card;
+  }
 }
 
 function advanceMission(kind, amount = 1) {
-  if (gameState.mission.kind !== kind) return;
-  gameState.mission.progress = Math.min(gameState.mission.goal, gameState.mission.progress + amount);
-  HUD.missionFill.style.width = (gameState.mission.progress / gameState.mission.goal * 100) + '%';
-  if (gameState.mission.progress >= gameState.mission.goal) {
-    gameState.score += 500;
-    showPopup(window.innerWidth / 2, window.innerHeight / 2, 'MISSION +500', true);
-    setTimeout(pickMission, 1200);
-    gameState.mission.kind = '__done__';
-    audio.play('mission');
+  if (!gameState.missions.length) return;
+  let any = false;
+  for (let i = 0; i < gameState.missions.length; i++) {
+    const m = gameState.missions[i];
+    if (m.done || m.kind !== kind) continue;
+    m.progress = Math.min(m.goal, m.progress + amount);
+    const fill = m._el?.querySelector('.mc-fill');
+    if (fill) fill.style.width = ((m.progress / m.goal) * 100) + '%';
+    any = true;
+    if (m.progress >= m.goal) {
+      m.done = true;
+      gameState.score += 500;
+      gameState.missionsDone++;
+      localStorage.setItem('subway-missions-done', String(gameState.missionsDone));
+      audio.play('mission');
+      showPopup(window.innerWidth / 2, window.innerHeight / 2 - 40, 'MISSION +500', true);
+      if (m._el) {
+        m._el.classList.add('done', 'flash');
+        m._el.querySelector('.mc-check').textContent = '✓';
+      }
+      // Replace the slot with a fresh mission after a short delay
+      setTimeout(() => replaceMissionSlot(i), 1200);
+      // Recurse for the meta "complete N missions" mission
+      advanceMission('mission');
+    }
   }
+  return any;
+}
+
+function replaceMissionSlot(i) {
+  const used = new Set(gameState.missions.map(m => m.id));
+  const repl = rollMission(used);
+  gameState.missions[i] = repl;
+  renderMissions();
+}
+
+function announceWave(n) {
+  HUD.waveBannerText.textContent = `WAVE ${n}`;
+  HUD.waveBanner.classList.remove('show');
+  void HUD.waveBanner.offsetWidth;
+  HUD.waveBanner.classList.add('show');
+}
+
+function updateWaves(dt) {
+  // A new wave every ~22s of run time. Density ramps with the wave,
+  // but we punctuate each new wave with a brief calm-before-storm
+  // dip so the rhythm doesn't feel uniform.
+  const waveInterval = 22;
+  const wantWave = 1 + Math.floor(gameState.elapsed / waveInterval);
+  if (wantWave !== gameState.wave) {
+    gameState.wave = wantWave;
+    announceWave(wantWave);
+  }
+  // Density curve: 0.6 -> 1.4 by wave 6, with a 0.6 dip in the first
+  // ~3s of every wave.
+  const intoWave = gameState.elapsed - (gameState.wave - 1) * waveInterval;
+  const calm = intoWave < 3 ? 0.6 : 1.0;
+  gameState.density = Math.min(1.4, (0.55 + gameState.wave * 0.13)) * calm;
 }
 
 function resetWorld() {
@@ -2081,6 +2179,7 @@ function tick() {
 
 function updateGame(dt, t) {
   gameState.elapsed += dt;
+  updateWaves(dt);
 
   // Speed ramp
   const target = Math.min(MAX_SPEED, BASE_SPEED + gameState.elapsed * SPEED_RAMP);
