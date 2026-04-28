@@ -372,7 +372,68 @@ function buildPlayer() {
   blob.position.y = 0.02;
   root.add(blob);
 
-  root.userData.parts = { legL, legR, armL, armR, shoeL, shoeR, handL, handR, head, cap, torso, blob };
+  // Hoverboard (hidden until power-up active)
+  const board = new THREE.Group();
+  const deck = boxMesh(1.6, 0.12, 0.55, 0x45e07b, { emissive: 0x45e07b, emissiveI: 0.4 });
+  deck.position.y = 0;
+  board.add(deck);
+  const stripe = boxMesh(1.62, 0.04, 0.18, 0xffffff, { emissive: 0xffffff, emissiveI: 0.5 });
+  stripe.position.y = 0.07;
+  board.add(stripe);
+  // Glow underside
+  const glow = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.2, 1.0),
+    new THREE.MeshBasicMaterial({ color: 0x45e07b, transparent: true, opacity: 0.55 }),
+  );
+  glow.rotation.x = -Math.PI / 2;
+  glow.position.y = -0.18;
+  board.add(glow);
+  // Trucks/wheels (decorative — they hover, but it sells the form)
+  for (const dx of [-0.55, 0.55]) {
+    const tr = boxMesh(0.22, 0.16, 0.28, 0x222233);
+    tr.position.set(dx, -0.08, 0);
+    board.add(tr);
+  }
+  board.position.y = 0.05;
+  board.visible = false;
+  root.add(board);
+
+  // Jetpack (hidden until power-up active)
+  const pack2 = new THREE.Group();
+  const tank = boxMesh(0.8, 1.0, 0.4, 0xff3da6, { emissive: 0xff3da6, emissiveI: 0.4 });
+  tank.position.set(0, 1.55, -0.55);
+  pack2.add(tank);
+  const tankCap = boxMesh(0.5, 0.1, 0.3, 0xffffff);
+  tankCap.position.set(0, 2.05, -0.55);
+  pack2.add(tankCap);
+  // Two nozzles
+  for (const dx of [-0.22, 0.22]) {
+    const noz = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.1, 0.16, 0.22, 10),
+      mat(0x222233, { metal: 0.5 }),
+    );
+    noz.position.set(dx, 0.95, -0.55);
+    pack2.add(noz);
+  }
+  pack2.visible = false;
+  root.add(pack2);
+
+  // Jet flame group
+  const flames = new THREE.Group();
+  for (const dx of [-0.22, 0.22]) {
+    const flame = new THREE.Mesh(
+      new THREE.ConeGeometry(0.16, 0.7, 10),
+      new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.9 }),
+    );
+    flame.rotation.x = Math.PI;
+    flame.position.set(dx, 0.55, -0.55);
+    flame.userData.base = 0.55;
+    flames.add(flame);
+  }
+  flames.visible = false;
+  root.add(flames);
+
+  root.userData.parts = { legL, legR, armL, armR, shoeL, shoeR, handL, handR, head, cap, torso, blob, board, pack2, flames };
   return root;
 }
 
@@ -437,6 +498,52 @@ function setRollingPose(rolling) {
   // Compress player vertically when rolling.
   player.scale.y = rolling ? 0.55 : 1;
   player.userData.parts.blob.material.opacity = rolling ? 0.5 : 0.35;
+}
+
+function updatePlayerGear(dt, t) {
+  const p = player.userData.parts;
+  const hover = gameState.powerups.hover > 0;
+  const jet = gameState.powerups.jet > 0;
+
+  // Hoverboard: visible when hover power active. Stop the run cycle leg
+  // motion (glue legs to the board surface) and add a gentle bob/tilt.
+  p.board.visible = hover;
+  if (hover) {
+    p.board.position.y = 0.05 + Math.sin(t * 5) * 0.04;
+    p.board.rotation.z = -player.rotation.z * 0.6;
+    p.shoeL.position.z = p.shoeL.userData.basePos.z;
+    p.shoeR.position.z = p.shoeR.userData.basePos.z;
+    p.legL.position.z = p.legL.userData.basePos.z;
+    p.legR.position.z = p.legR.userData.basePos.z;
+    p.shoeL.position.y = p.shoeL.userData.basePos.y + 0.18;
+    p.shoeR.position.y = p.shoeR.userData.basePos.y + 0.18;
+    // Tail trail on the ground
+    if (Math.random() < 0.7) spawnTrail();
+  }
+
+  // Jetpack + flames: visible when jet active.
+  p.pack2.visible = jet;
+  p.flames.visible = jet;
+  if (jet) {
+    for (const f of p.flames.children) {
+      const flick = 0.55 + Math.sin(t * 30 + f.position.x * 5) * 0.15;
+      f.position.y = f.userData.base - 0.25 + flick * 0.2;
+      f.scale.y = 0.7 + Math.random() * 0.6;
+      f.material.color.setHex(Math.random() < 0.5 ? 0xffd23f : 0xff7a1a);
+    }
+    // Smoke trail behind
+    if (Math.random() < 0.5) {
+      const puff = new THREE.Mesh(
+        new THREE.SphereGeometry(0.25 + Math.random() * 0.2, 6, 5),
+        new THREE.MeshBasicMaterial({ color: 0xeeeeee, transparent: true, opacity: 0.5 }),
+      );
+      puff.position.copy(player.position);
+      puff.position.y += 1.0 + Math.random() * 0.4;
+      puff.position.z -= 0.6;
+      puff.userData = { life: 0.6 };
+      trailGroup.add(puff);
+    }
+  }
 }
 
 // ===== World container =====
@@ -1289,12 +1396,31 @@ function startGame() {
   playerState.speed = BASE_SPEED;
   playerState.distance = 0;
   playerState.jumpsDone = 0;
+  playerState.tilt = 0;
   player.position.set(0, 0, 0);
+  player.rotation.set(0, 0, 0);
   setRollingPose(false);
 
-  // Reset chasers behind
+  // Reset death-sequence state and player part transforms
+  deathSeq.active = false;
+  deathSeq.t = 0;
+  const p = player.userData.parts;
+  p.cap.position.set(0, 2.72, 0);
+  p.cap.rotation.set(0, 0, 0);
+  p.armL.rotation.set(0, 0, 0);
+  p.armR.rotation.set(0, 0, 0);
+  p.board.visible = false;
+  p.pack2.visible = false;
+  p.flames.visible = false;
+
+  // Reset chasers
   guard.position.set(-1.2, 0, -8);
+  guard.rotation.set(0, 0, 0);
+  const gp = guard.userData.parts;
+  gp.armL.rotation.set(0, 0, 0);
+  gp.armR.rotation.set(0, 0, 0);
   dog.position.set(1.5, 0, -7);
+  dog.rotation.set(0, 0, 0);
 }
 
 function pickMission() {
@@ -1551,6 +1677,8 @@ function handleCollisions(dt) {
 function triggerDeath(obj) {
   if (!playerState.alive) return;
   playerState.alive = false;
+  deathSeq.t = 0;
+  deathSeq.active = true;
 
   // Visual hit feedback
   const flash = document.getElementById('hit-flash');
@@ -1561,7 +1689,7 @@ function triggerDeath(obj) {
   // Camera shake + brief slow-mo
   cameraShake.t = 0.55;
   cameraShake.amp = 0.55;
-  gameState.slowmo = 0.6;
+  gameState.slowmo = 0.7;
 
   // FX burst at the impact point
   if (obj) {
@@ -1571,20 +1699,78 @@ function triggerDeath(obj) {
   }
   spawnSparkle(player.position.clone().add(new THREE.Vector3(0, 1.4, 0)), 0xffffff);
 
-  // Slam player flat — stop run cycle visibly
-  player.userData.parts.armL.rotation.x = -1.2;
-  player.userData.parts.armR.rotation.x = -1.2;
-  setRollingPose(false);
+  // Hide any active power-up gear immediately
+  player.userData.parts.board.visible = false;
+  player.userData.parts.pack2.visible = false;
+  player.userData.parts.flames.visible = false;
 
   audio.play('hit');
   audio.stopMusic();
 
-  // Knock guard into view fast
-  guard.userData.win = true;
-  setTimeout(showGameOver, 1100);
+  setTimeout(showGameOver, 1500);
 }
 
 const cameraShake = { t: 0, amp: 0 };
+const deathSeq = { t: 0, active: false };
+
+function updateDeathSequence(dt) {
+  if (!deathSeq.active) return;
+  deathSeq.t += dt;
+  const t = deathSeq.t;
+  const p = player.userData.parts;
+
+  // Phase 1 (0-0.4s): player tumbles forward, guard sprints in.
+  // Phase 2 (0.4-0.9s): guard grabs collar, dog leaps with bark.
+  // Phase 3 (0.9-1.5s): held in place, camera pulls back.
+
+  // Player flop: rotate forward + drop a little
+  player.rotation.x = Math.min(0.9, t * 2.4);
+  player.position.y = Math.max(0, playerState.y - t * 0.6);
+  // Arms flail back
+  p.armL.rotation.x = -1.2 - Math.sin(t * 12) * 0.4;
+  p.armR.rotation.x = -1.2 + Math.sin(t * 12) * 0.4;
+  // Cap pops off (slide it up and back, fade out via scale)
+  p.cap.position.z = -t * 1.5;
+  p.cap.position.y = 2.72 + t * 1.2 - t * t * 2;
+  p.cap.rotation.x = t * 4;
+
+  // Guard rushes in then locks on
+  const gp = guard.userData.parts;
+  if (t < 0.45) {
+    // Sprint forward fast
+    const targetZ = -1.2;
+    guard.position.z += (targetZ - guard.position.z) * Math.min(1, 9 * dt);
+    guard.position.x += (player.position.x - guard.position.x) * Math.min(1, 6 * dt);
+    // Arm-pump fast
+    const swing = Math.sin(t * 30) * 1.0;
+    gp.legL.position.z = gp.legL.userData.basePos.z + swing * 0.4;
+    gp.legR.position.z = gp.legR.userData.basePos.z - swing * 0.4;
+    gp.armL.rotation.x = -swing * 1.2;
+    gp.armR.rotation.x = swing * 1.2;
+  } else {
+    // Lunge: arms reach out forward toward player
+    gp.armL.rotation.x = -2.0;
+    gp.armR.rotation.x = -2.0;
+    gp.legL.position.z = gp.legL.userData.basePos.z;
+    gp.legR.position.z = gp.legR.userData.basePos.z;
+    guard.position.x += (player.position.x - 0.35 - guard.position.x) * Math.min(1, 6 * dt);
+    guard.position.z += (player.position.z - 0.6 - guard.position.z) * Math.min(1, 7 * dt);
+  }
+
+  // Dog leaps at ~0.3s, peaks ~0.6s
+  const leapT = Math.max(0, t - 0.3);
+  const leapY = Math.max(0, leapT * 6 - leapT * leapT * 9);
+  dog.position.y = leapY;
+  dog.position.z += ((player.position.z + 0.4) - dog.position.z) * Math.min(1, 6 * dt);
+  dog.position.x += ((player.position.x + 1.0) - dog.position.x) * Math.min(1, 4 * dt);
+  dog.rotation.x = -leapT * 1.5;
+
+  // Camera pulls in tighter on the action
+  if (t > 0.4) {
+    cameraShake.t = Math.max(cameraShake.t, 0.05);
+    cameraShake.amp = 0.15;
+  }
+}
 
 function showGameOver() {
   gameState.running = false;
@@ -1694,14 +1880,20 @@ function updateGame(dt, t) {
 
   // Animate player and chasers
   animatePlayer(dt, true);
+  updatePlayerGear(dt, t);
   animateChasers(dt, t);
 
-  // Chasers follow behind unless death triggered
-  const guardTargetZ = playerState.alive ? -7 : -2;
-  guard.position.z += (guardTargetZ - guard.position.z) * Math.min(1, 2.5 * dt);
-  guard.position.x += (player.position.x - 1.2 - guard.position.x) * Math.min(1, 3 * dt);
-  dog.position.z += ((guardTargetZ + 1.5) - dog.position.z) * Math.min(1, 2.8 * dt);
-  dog.position.x += (player.position.x + 1.5 - dog.position.x) * Math.min(1, 3 * dt);
+  // Chasers follow behind during normal play; the death sequence
+  // takes over the chasers' positions once it's active.
+  if (!deathSeq.active) {
+    const guardTargetZ = -7;
+    guard.position.z += (guardTargetZ - guard.position.z) * Math.min(1, 2.5 * dt);
+    guard.position.x += (player.position.x - 1.2 - guard.position.x) * Math.min(1, 3 * dt);
+    dog.position.z += ((guardTargetZ + 1.5) - dog.position.z) * Math.min(1, 2.8 * dt);
+    dog.position.x += (player.position.x + 1.5 - dog.position.x) * Math.min(1, 3 * dt);
+  } else {
+    updateDeathSequence(dt);
+  }
 
   // Scroll world
   const scroll = playerState.speed * dt;
