@@ -201,25 +201,27 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(COLORS.sky);
-scene.fog = new THREE.Fog(COLORS.sky, 70, 180);
+scene.fog = new THREE.Fog(COLORS.sky, 80, 220);
 
 const camera = new THREE.PerspectiveCamera(
-  62, window.innerWidth / window.innerHeight, 0.1, 400
+  68, window.innerWidth / window.innerHeight, 0.1, 400
 );
-camera.position.set(0, 6.2, -9);
+camera.position.set(0, 6.4, -10);
 camera.lookAt(0, 2.5, 8);
 
 // ===== Lights =====
-const hemi = new THREE.HemisphereLight(0xffffff, 0x4a3b6a, 0.85);
+const hemi = new THREE.HemisphereLight(0xfff7e0, 0x4a3b6a, 1.0);
 scene.add(hemi);
 
-const sun = new THREE.DirectionalLight(0xfff2d4, 1.3);
+const sun = new THREE.DirectionalLight(0xfff2d4, 1.55);
 sun.position.set(20, 40, -10);
 sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 1;
 sun.shadow.camera.far = 100;
 sun.shadow.camera.left = -25;
@@ -463,35 +465,59 @@ function animatePlayer(dt, running) {
 
   // Run cycle speed scales with movement speed
   const cycle = t * (playerState.speed * 0.55);
-  const swing = Math.sin(cycle) * 0.9;
-  const swing2 = Math.cos(cycle) * 0.9;
+  const swing = Math.sin(cycle);
+  const swing2 = Math.cos(cycle);
 
-  // legs
-  p.legL.position.z = p.legL.userData.basePos.z + swing * 0.35;
-  p.legR.position.z = p.legR.userData.basePos.z - swing * 0.35;
-  p.legL.position.y = p.legL.userData.basePos.y + Math.max(0, swing) * 0.18;
-  p.legR.position.y = p.legR.userData.basePos.y + Math.max(0, -swing) * 0.18;
+  // legs — bigger range plus subtle lift to feel like a real stride
+  p.legL.position.z = p.legL.userData.basePos.z + swing * 0.40;
+  p.legR.position.z = p.legR.userData.basePos.z - swing * 0.40;
+  p.legL.position.y = p.legL.userData.basePos.y + Math.max(0, swing) * 0.22;
+  p.legR.position.y = p.legR.userData.basePos.y + Math.max(0, -swing) * 0.22;
+  p.legL.rotation.x = -swing * 0.45;
+  p.legR.rotation.x =  swing * 0.45;
 
   // shoes follow legs
-  p.shoeL.position.z = p.shoeL.userData.basePos.z + swing * 0.55;
-  p.shoeR.position.z = p.shoeR.userData.basePos.z - swing * 0.55;
-  p.shoeL.position.y = p.shoeL.userData.basePos.y + Math.max(0, swing) * 0.25;
-  p.shoeR.position.y = p.shoeR.userData.basePos.y + Math.max(0, -swing) * 0.25;
+  p.shoeL.position.z = p.shoeL.userData.basePos.z + swing * 0.62;
+  p.shoeR.position.z = p.shoeR.userData.basePos.z - swing * 0.62;
+  p.shoeL.position.y = p.shoeL.userData.basePos.y + Math.max(0, swing) * 0.32;
+  p.shoeR.position.y = p.shoeR.userData.basePos.y + Math.max(0, -swing) * 0.32;
 
-  // arms (counter swing)
-  p.armL.position.z = p.armL.userData.basePos.z - swing * 0.28;
-  p.armR.position.z = p.armR.userData.basePos.z + swing * 0.28;
-  p.armL.rotation.x = -swing * 0.6;
-  p.armR.rotation.x = swing * 0.6;
-  p.handL.position.z = p.handL.userData.basePos.z - swing * 0.5;
-  p.handR.position.z = p.handR.userData.basePos.z + swing * 0.5;
-  p.handL.position.y = p.handL.userData.basePos.y + swing2 * 0.05;
-  p.handR.position.y = p.handR.userData.basePos.y - swing2 * 0.05;
+  // arms — strong counter-swing with shoulder rotation
+  p.armL.position.z = p.armL.userData.basePos.z - swing * 0.32;
+  p.armR.position.z = p.armR.userData.basePos.z + swing * 0.32;
+  p.armL.rotation.x = -swing * 0.85;
+  p.armR.rotation.x =  swing * 0.85;
+  p.handL.position.z = p.handL.userData.basePos.z - swing * 0.55;
+  p.handR.position.z = p.handR.userData.basePos.z + swing * 0.55;
+  p.handL.position.y = p.handL.userData.basePos.y + swing2 * 0.08;
+  p.handR.position.y = p.handR.userData.basePos.y - swing2 * 0.08;
 
-  // body bob
-  p.torso.position.y = 1.55 + Math.abs(swing) * 0.06;
-  p.head.position.y = 2.35 + Math.abs(swing) * 0.06;
-  p.cap.position.y = 2.72 + Math.abs(swing) * 0.06;
+  // Body bob + sway. The sway is in tile-local x and shifts torso/head
+  // slightly opposite to the leading foot for a natural stride.
+  const bob = Math.abs(swing) * 0.09;
+  const sway = swing2 * 0.04;
+  p.torso.position.y = 1.55 + bob;
+  p.torso.position.x = sway;
+  p.torso.rotation.z = -sway * 0.5;
+  p.head.position.y = 2.35 + bob;
+  p.head.position.x = sway * 0.6;
+  p.head.rotation.z = -sway * 0.3;
+  p.cap.position.y = 2.72 + bob;
+  p.cap.position.x = sway * 0.6;
+  p.cap.rotation.z = -sway * 0.3;
+
+  // Footstep dust — emit a tiny puff each time a foot plants
+  // (transition through swing == 0 going positive/negative).
+  const lastSwing = playerState._lastSwing ?? 0;
+  if ((lastSwing < 0 && swing >= 0) || (lastSwing > 0 && swing <= 0)) {
+    if (playerState.y < 0.05 && playerState.alive && gameState.running) {
+      const footX = swing >= 0
+        ? player.position.x + p.shoeR.userData.basePos.x
+        : player.position.x + p.shoeL.userData.basePos.x;
+      spawnDust(footX, 0.05, player.position.z);
+    }
+  }
+  playerState._lastSwing = swing;
 }
 
 function setRollingPose(rolling) {
@@ -1566,6 +1592,42 @@ function updateFX(dt) {
 // Trail behind player when speed boost active
 const trailGroup = new THREE.Group();
 scene.add(trailGroup);
+// Footstep dust puff at ground level
+function spawnDust(x, y, z) {
+  const count = 3;
+  for (let i = 0; i < count; i++) {
+    const puff = new THREE.Mesh(
+      new THREE.SphereGeometry(0.08 + Math.random() * 0.06, 5, 4),
+      new THREE.MeshBasicMaterial({ color: 0xb9a87a, transparent: true, opacity: 0.55 }),
+    );
+    puff.position.set(x + (Math.random() - 0.5) * 0.3, y, z + (Math.random() - 0.5) * 0.3);
+    puff.userData = {
+      vel: new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.6 + Math.random() * 0.4, (Math.random() - 0.5) * 0.6),
+      life: 0.4,
+      isDust: true,
+    };
+    trailGroup.add(puff);
+  }
+}
+
+// Bigger impact puff for landings / heavy contacts
+function spawnImpact(x, y, z) {
+  for (let i = 0; i < 8; i++) {
+    const puff = new THREE.Mesh(
+      new THREE.SphereGeometry(0.15 + Math.random() * 0.1, 6, 5),
+      new THREE.MeshBasicMaterial({ color: 0xd4c290, transparent: true, opacity: 0.7 }),
+    );
+    const a = (i / 8) * Math.PI * 2;
+    puff.position.set(x + Math.cos(a) * 0.35, y + 0.05, z + Math.sin(a) * 0.35);
+    puff.userData = {
+      vel: new THREE.Vector3(Math.cos(a) * 1.4, 0.8 + Math.random() * 0.6, Math.sin(a) * 1.4),
+      life: 0.5,
+      isDust: true,
+    };
+    trailGroup.add(puff);
+  }
+}
+
 function spawnTrail() {
   const p = new THREE.Mesh(
     new THREE.PlaneGeometry(0.6, 0.6),
@@ -1594,18 +1656,27 @@ function updateTrail(dt) {
     if (p.userData.life <= 0) {
       trailGroup.remove(p);
       p.geometry.dispose(); p.material.dispose();
-    } else {
-      if (p.userData.twinkle) {
-        p.material.opacity = Math.max(0, p.userData.life * 3.6);
-        p.rotation.z += dt * 7;
-        p.scale.setScalar(0.75 + (0.24 - p.userData.life) * 2.7);
-        p.lookAt(camera.position);
-        p.position.y += dt * 1.2;
-      } else {
-        p.material.opacity = p.userData.life * 1.4;
-        p.scale.setScalar(1 + (0.5 - p.userData.life) * 1.5);
-      }
+      continue;
+    }
+    if (p.userData.isDust && p.userData.vel) {
+      // Dust puffs drift up, slow down, settle
+      p.position.addScaledVector(p.userData.vel, dt);
+      p.userData.vel.multiplyScalar(0.92);
+      p.userData.vel.y -= 1.5 * dt;
+      p.material.opacity = p.userData.life * 1.4;
+      p.scale.setScalar(1 + (0.5 - p.userData.life) * 1.8);
+    } else if (p.userData.twinkle) {
+      // Coin sparkle: pulse, rotate, billboard to camera, drift up
+      p.material.opacity = Math.max(0, p.userData.life * 3.6);
+      p.rotation.z += dt * 7;
+      p.scale.setScalar(0.75 + (0.24 - p.userData.life) * 2.7);
+      p.lookAt(camera.position);
+      p.position.y += dt * 1.2;
       p.material.opacity *= 0.88 + Math.sin(t * 36 + i) * 0.12;
+    } else {
+      // Original ground-trail behavior (speed power-up, jet smoke)
+      p.material.opacity = p.userData.life * 1.4;
+      p.scale.setScalar(1 + (0.5 - p.userData.life) * 1.5);
     }
   }
 }
@@ -1677,15 +1748,27 @@ touchArea.addEventListener('touchend', (e) => {
   }
 }, { passive: true });
 
-// Keyboard fallback
+// Keyboard input — desktop primary path. Space starts the game from
+// title / restarts from game-over so you can run with no mouse.
 window.addEventListener('keydown', (e) => {
   if (e.repeat) return;
+
+  // On title or game-over: Space / Enter starts a new run.
+  if (!gameState.running) {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      startGame();
+      return;
+    }
+  }
+
   switch (e.key) {
     case 'ArrowLeft': case 'a': case 'A': changeLane(1); break;
     case 'ArrowRight': case 'd': case 'D': changeLane(-1); break;
     case 'ArrowUp': case 'w': case 'W': case ' ': jump(); break;
     case 'ArrowDown': case 's': case 'S': roll(); break;
     case 'p': case 'P': case 'Escape': togglePause(); break;
+    case 'm': case 'M': muteBtn?.click(); break;
   }
 });
 
@@ -2452,6 +2535,10 @@ function updateGame(dt, t) {
       if (playerState.jumping && playerState.vy < 0) {
         playerState.jumpsDone = (playerState.jumpsDone || 0) + 1;
         advanceMission('jump');
+        // Landing impact — dust + tiny camera nudge for weight
+        spawnImpact(player.position.x, 0.05, player.position.z);
+        cameraShake.t = Math.max(cameraShake.t, 0.12);
+        cameraShake.amp = Math.max(cameraShake.amp, 0.08);
       }
       playerState.y = 0;
       playerState.vy = 0;

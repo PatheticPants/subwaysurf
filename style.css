@@ -641,3 +641,41 @@ body {
   .character-preview::before { width: 96px; height: 116px; }
   .big-btn { padding: 14px 30px; font-size: 18px; }
 }
+
+/* Desktop scaling — bump the HUD so it reads at 1080p+ */
+@media (min-width: 1024px) {
+  .hud-card { padding: 12px 18px; min-width: 110px; border-radius: 22px; }
+  .hud-card .label { font-size: 13px; }
+  .hud-card .value { font-size: 28px; }
+  .coin-icon { width: 28px; height: 28px; }
+  .coin-icon::before { font-size: 18px; }
+  .pause-btn, .mute-btn { width: 52px; height: 52px; font-size: 26px; border-radius: 16px; }
+  .pause-btn span { width: 6px; height: 22px; }
+
+  .missions-stack { width: min(36vw, 360px); top: calc(var(--safe-top) + 96px); gap: 7px; }
+  .mission-card { padding: 10px 14px 10px 38px; font-size: 13px; border-radius: 14px; }
+  .mission-card .mc-check { width: 22px; height: 22px; font-size: 14px; left: 9px; }
+  .mission-card .mc-progress { height: 5px; }
+
+  .powerups { top: calc(var(--safe-top) + 142px); }
+  .powerup-pill { font-size: 14px; padding: 9px 14px 9px 42px; min-width: 110px; }
+  .powerup-pill .icon { width: 28px; height: 28px; left: 8px; font-size: 16px; }
+
+  .multiplier { font-size: 22px; padding: 6px 18px; }
+
+  .logo-line { font-size: 84px; }
+  .logo-line.accent { font-size: 108px; }
+  .tagline { font-size: 18px; letter-spacing: 6px; }
+  .character-preview { width: 240px; height: 260px; }
+  .character-preview::before { width: 170px; height: 200px; }
+  .big-btn { padding: 22px 50px; font-size: 28px; border-radius: 32px; }
+  .hint { font-size: 14px; }
+
+  .panel { width: min(60vw, 480px); padding: 36px 32px; }
+  .panel h2 { font-size: 44px; letter-spacing: 5px; margin-bottom: 24px; }
+  .r-label { font-size: 14px; }
+  .r-val { font-size: 28px; }
+
+  #busted-stamp { font-size: 96px; letter-spacing: 10px; }
+  .wave-banner { font-size: 30px; padding: 14px 36px; letter-spacing: 6px; }
+}
